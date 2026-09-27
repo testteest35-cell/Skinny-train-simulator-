@@ -139,6 +139,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         physicsEngine.resetScenario(ScenarioId.FREE_ROAM)
+        physicsEngine.throttleNotch = 3
+        physicsEngine.autoBrakePercent = 0f
+        physicsEngine.indBrakePercent = 0f
         viewModelScope.launch {
             val initialBmp = GeminiRailStudioService.renderProceduralLiveryBitmap(
                 "Amber & Slate Heavy Freight Locomotive in Alpine Pass",
@@ -260,8 +263,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cycleCameraMode() {
-        val modes = CameraViewMode.entries
-        val next = modes[(_uiState.value.cameraMode.ordinal + 1) % modes.size]
+        val primaryModes = listOf(
+            CameraViewMode.CHASE_CAM,
+            CameraViewMode.CAB_VIEW,
+            CameraViewMode.FREE_ORBIT,
+            CameraViewMode.TRACKSIDE_CAM,
+            CameraViewMode.STATION_FLYBY
+        )
+        val currentIdx = primaryModes.indexOf(_uiState.value.cameraMode).let { if (it < 0) 0 else it }
+        val next = primaryModes[(currentIdx + 1) % primaryModes.size]
         _uiState.update { it.copy(cameraMode = next) }
         triggerSubtitle("[CAMERA: ${next.label.uppercase()}]")
     }

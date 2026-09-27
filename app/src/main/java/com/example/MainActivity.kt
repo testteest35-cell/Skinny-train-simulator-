@@ -2,6 +2,7 @@ package com.example
 
 import android.os.Bundle
 import android.view.KeyEvent
+import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -9,9 +10,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -20,23 +24,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Train
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -44,32 +38,33 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.data.SaveSlotEntity
+import com.example.sim.SignalAspect
 import com.example.ui.AiRailStudioScreen
-import com.example.ui.BottomCabControlsDeck
-import com.example.ui.EngineArchitectureDocsScreen
-import com.example.ui.F3DiagnosticsOverlay
 import com.example.ui.SimViewport3D
-import com.example.ui.TopTelemetryHud
 import com.example.ui.theme.AmberGold
-import com.example.ui.theme.CyanTelemetry
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.RailBorderSteel
-import com.example.ui.theme.RailCardDark
 import com.example.ui.theme.RailSurfaceDark
-import com.example.ui.theme.SignalGreen
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
+    private var activeWebView: WebView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
-                IronRailSimApp(viewModel = viewModel)
+                IronRailSimApp(
+                    viewModel = viewModel,
+                    onWebViewReady = { activeWebView = it }
+                )
             }
         }
     }
@@ -94,39 +89,16 @@ class MainActivity : ComponentActivity() {
                 true
             }
             KeyEvent.KEYCODE_SPACE -> {
-                viewModel.setAutoBrake((state.autoBrakePercent + 25f).coerceAtMost(100f))
-                true
-            }
-            KeyEvent.KEYCODE_H -> {
-                viewModel.soundHorn()
-                true
-            }
-            KeyEvent.KEYCODE_B -> {
-                viewModel.ringBell()
-                true
-            }
-            KeyEvent.KEYCODE_V -> {
-                viewModel.toggleSand()
-                true
-            }
-            KeyEvent.KEYCODE_L -> {
-                viewModel.cycleHeadlights()
+                val nextBrake = if (state.autoBrakePercent >= 75f) 0f else state.autoBrakePercent + 25f
+                viewModel.setAutoBrake(nextBrake)
                 true
             }
             KeyEvent.KEYCODE_C -> {
                 viewModel.cycleCameraMode()
                 true
             }
-            KeyEvent.KEYCODE_F3 -> {
-                viewModel.toggleF3Diagnostics()
-                true
-            }
-            KeyEvent.KEYCODE_F9 -> {
-                viewModel.runF9SelfTest()
-                true
-            }
-            KeyEvent.KEYCODE_M -> {
-                viewModel.toggleMute()
+            KeyEvent.KEYCODE_H -> {
+                viewModel.soundHorn()
                 true
             }
             else -> super.onKeyDown(keyCode, event)
@@ -134,190 +106,295 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun IronRailSimApp(viewModel: MainViewModel) {
+fun IronRailSimApp(
+    viewModel: MainViewModel,
+    onWebViewReady: (WebView) -> Unit = {}
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val saveSlots by viewModel.saveSlots.collectAsStateWithLifecycle()
     val surveyorItems by viewModel.surveyorItems.collectAsStateWithLifecycle()
     val mediaHistory by viewModel.generatedMediaHistory.collectAsStateWithLifecycle()
 
-    BackHandler(enabled = state.activeTab != MainNavTab.SIMULATOR || state.isSurveyorMode) {
-        if (state.activeTab != MainNavTab.SIMULATOR) {
-            viewModel.selectTab(MainNavTab.SIMULATOR)
-        } else if (state.isSurveyorMode) {
-            viewModel.setSurveyorMode(false)
-        }
+    BackHandler(enabled = state.activeTab != MainNavTab.SIMULATOR) {
+        viewModel.selectTab(MainNavTab.SIMULATOR)
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets.safeDrawing,
-        bottomBar = {
-            NavigationBar(
-                containerColor = RailSurfaceDark,
-                modifier = Modifier.border(1.dp, RailBorderSteel)
-            ) {
-                NavigationBarItem(
-                    selected = state.activeTab == MainNavTab.SIMULATOR,
-                    onClick = { viewModel.selectTab(MainNavTab.SIMULATOR) },
-                    icon = { Icon(Icons.Default.Train, contentDescription = "3D Simulator") },
-                    label = { Text("3D Simulator") },
-                    modifier = Modifier.testTag("nav_tab_simulator")
-                )
-                NavigationBarItem(
-                    selected = state.activeTab == MainNavTab.AI_STUDIO,
-                    onClick = { viewModel.selectTab(MainNavTab.AI_STUDIO) },
-                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = "AI Rail Studio") },
-                    label = { Text("AI Rail Studio") },
-                    modifier = Modifier.testTag("nav_tab_ai_studio")
-                )
-                NavigationBarItem(
-                    selected = state.activeTab == MainNavTab.DOCS_QA,
-                    onClick = { viewModel.selectTab(MainNavTab.DOCS_QA) },
-                    icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = "Engine & QA") },
-                    label = { Text("Engine & QA") },
-                    modifier = Modifier.testTag("nav_tab_docs_qa")
-                )
-            }
-        }
-    ) { innerPadding ->
-        Box(
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 1. Full-Screen Native 3D Perspective Train Simulator Viewport
+        SimViewport3D(
+            positionMeters = state.positionMeters,
+            speedMps = state.speedMps,
+            gradientPercent = state.gradientPercent,
+            curveDeg = state.curveDeg,
+            throttleNotch = state.throttleNotch,
+            reverser = state.reverser,
+            autoBrakePercent = state.autoBrakePercent,
+            indBrakePercent = state.indBrakePercent,
+            brakePipePsi = state.brakePipePsi,
+            sandActive = state.sandActive,
+            headlightState = state.headlightState,
+            wipersActive = state.wipersActive,
+            wiperPhaseRad = state.wiperPhaseRad,
+            wheelRotationRad = state.wheelRotationRad,
+            timeOfDay = state.timeOfDay,
+            weather = state.weather,
+            qualityPreset = state.qualityPreset,
+            cameraMode = state.cameraMode,
+            locoIndex = state.selectedLocoIndex,
+            freightCarIndex = state.selectedFreightCarIndex,
+            freightCarCount = state.scenario.freightCarCount,
+            nextSignalAspect = state.nextSignalAspect,
+            distanceToNextSignal = state.distanceToNextSignal,
+            distanceToNextStation = state.distanceToNextStation,
+            particles = viewModel.physicsEngine.particlePool,
+            reducedMotion = state.reducedMotion,
+            customLiveryColor = state.customLiveryColor,
+            isSurveyorMode = state.isSurveyorMode,
+            surveyorItems = surveyorItems,
+            onSurveyorGridTap = { gx, gz -> viewModel.placeSurveyorItemAt(gx, gz) },
+            onWebViewReady = onWebViewReady,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // 2. Minimal, Sleek, Transparent Corner HUD Overlay (Corners Only, Clean Sans-Serif)
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            when (state.activeTab) {
-                MainNavTab.SIMULATOR -> {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                            SimViewport3D(
-                                positionMeters = state.positionMeters,
-                                speedMps = state.speedMps,
-                                gradientPercent = state.gradientPercent,
-                                curveDeg = state.curveDeg,
-                                throttleNotch = state.throttleNotch,
-                                reverser = state.reverser,
-                                autoBrakePercent = state.autoBrakePercent,
-                                indBrakePercent = state.indBrakePercent,
-                                brakePipePsi = state.brakePipePsi,
-                                sandActive = state.sandActive,
-                                headlightState = state.headlightState,
-                                wipersActive = state.wipersActive,
-                                wiperPhaseRad = state.wiperPhaseRad,
-                                wheelRotationRad = state.wheelRotationRad,
-                                timeOfDay = state.timeOfDay,
-                                weather = state.weather,
-                                qualityPreset = state.qualityPreset,
-                                cameraMode = state.cameraMode,
-                                locoIndex = state.selectedLocoIndex,
-                                freightCarIndex = state.selectedFreightCarIndex,
-                                freightCarCount = state.scenario.freightCarCount,
-                                nextSignalAspect = state.nextSignalAspect,
-                                distanceToNextSignal = state.distanceToNextSignal,
-                                distanceToNextStation = state.distanceToNextStation,
-                                particles = viewModel.physicsEngine.particlePool,
-                                reducedMotion = state.reducedMotion,
-                                customLiveryColor = state.customLiveryColor,
-                                isSurveyorMode = state.isSurveyorMode,
-                                surveyorItems = surveyorItems,
-                                onSurveyorGridTap = { gx, gz -> viewModel.placeSurveyorItemAt(gx, gz) }
-                            )
-
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                TopTelemetryHud(
-                                    speedKmH = state.speedKmH,
-                                    gradientPercent = state.gradientPercent,
-                                    brakePipePsi = state.brakePipePsi,
-                                    nextSignal = state.nextSignalAspect,
-                                    distanceToNextSignal = state.distanceToNextSignal,
-                                    distanceToNextStation = state.distanceToNextStation,
-                                    positionMeters = state.positionMeters,
-                                    scenario = state.scenario,
-                                    scenarioScore = state.scenarioScore,
-                                    wheelSlip = state.wheelSlip,
-                                    spadPenalty = state.spadPenalty,
-                                    cameraMode = state.cameraMode,
-                                    timeOfDay = state.timeOfDay,
-                                    weather = state.weather,
-                                    qualityPreset = state.qualityPreset,
-                                    statusMessage = state.statusMessage,
-                                    subtitleCue = state.subtitleCue,
-                                    uiScale = state.uiScale,
-                                    f3Visible = state.f3Visible,
-                                    onToggleF3 = viewModel::toggleF3Diagnostics,
-                                    onRunF9SelfTest = viewModel::runF9SelfTest,
-                                    onCycleCamera = viewModel::cycleCameraMode,
-                                    onCycleTimeOfDay = viewModel::cycleTimeOfDay,
-                                    onCycleWeather = viewModel::cycleWeather,
-                                    onCycleQualityPreset = viewModel::cycleQualityPreset,
-                                    onOpenSaveModal = { viewModel.setShowSaveModal(true) },
-                                    onOpenAccessModal = { viewModel.setShowAccessModal(true) },
-                                    muted = state.muted,
-                                    onToggleMute = viewModel::toggleMute
-                                )
-
-                                if (state.f3Visible) {
-                                    F3DiagnosticsOverlay(
-                                        fps = state.fps,
-                                        avgFrameMs = state.avgFrameMs,
-                                        onePercentLowMs = state.onePercentLowMs,
-                                        drawCalls = state.drawCalls,
-                                        triangles = state.triangles,
-                                        culledObjects = state.culledObjects,
-                                        heapMb = state.heapMb,
-                                        tickCount = state.tickCount,
-                                        seed = state.seed,
-                                        activeParticles = state.activeParticles,
-                                        qualityTierLabel = state.qualityTierLabel,
-                                        benchmarkRunning = state.benchmarkRunning,
-                                        benchmarkReport = state.benchmarkReport,
-                                        selfTestReport = state.selfTestReport,
-                                        onStartBenchmark = viewModel::start30sBenchmark
-                                    )
-                                }
-                            }
+            // TOP CORNERS ROW
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                // Top-Left Corner: Route Signal, Grade & Active 3D Camera Badge
+                CornerHudCard(modifier = Modifier.testTag("hud_top_left_card")) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        val sigColor = when (state.nextSignalAspect) {
+                            SignalAspect.CLEAR_GREEN -> Color(0xFF22C55E)
+                            SignalAspect.APPROACH_YELLOW -> Color(0xFFFACC15)
+                            SignalAspect.STOP_RED -> Color(0xFFEF4444)
                         }
-
-                        BottomCabControlsDeck(
-                            isSurveyorMode = state.isSurveyorMode,
-                            onToggleSurveyorMode = viewModel::setSurveyorMode,
-                            throttleNotch = state.throttleNotch,
-                            onThrottleChange = viewModel::setThrottleNotch,
-                            reverser = state.reverser,
-                            onReverserChange = viewModel::setReverser,
-                            autoBrakePercent = state.autoBrakePercent,
-                            onAutoBrakeChange = viewModel::setAutoBrake,
-                            indBrakePercent = state.indBrakePercent,
-                            onIndBrakeChange = viewModel::setIndBrake,
-                            dynamicBrakeNotch = state.dynamicBrakeNotch,
-                            onDynamicBrakeChange = viewModel::setDynamicBrake,
-                            sandActive = state.sandActive,
-                            onToggleSand = viewModel::toggleSand,
-                            headlightState = state.headlightState,
-                            onCycleHeadlights = viewModel::cycleHeadlights,
-                            wipersActive = state.wipersActive,
-                            onToggleWipers = viewModel::toggleWipers,
-                            couplerSlackEnabled = state.couplerSlackEnabled,
-                            onToggleCouplerSlack = viewModel::toggleCouplerSlack,
-                            onSoundHorn = viewModel::soundHorn,
-                            onRingBell = viewModel::ringBell,
-                            onEmergencyBrake = viewModel::triggerEmergencyBrake,
-                            selectedScenario = state.scenario,
-                            onSelectScenario = viewModel::selectScenario,
-                            selectedLocoIndex = state.selectedLocoIndex,
-                            onSelectLoco = viewModel::selectLocomotive,
-                            selectedSurveyorAssetId = state.selectedSurveyorAssetId,
-                            isPlacingTrackSpline = state.isPlacingTrackSpline,
-                            onSelectSurveyorModeType = viewModel::setSurveyorPlacementMode,
-                            onSelectSurveyorAsset = viewModel::selectSurveyorAsset,
-                            surveyorSnapAngleDeg = state.surveyorSnapAngleDeg,
-                            onRotateSurveyorSnap = viewModel::rotateSurveyorSnap5Deg,
-                            onSurveyorUndo = viewModel::surveyorUndo,
-                            onSurveyorRedo = viewModel::surveyorRedo
+                        Box(
+                            modifier = Modifier
+                                .size(9.dp)
+                                .clip(CircleShape)
+                                .background(sigColor)
+                        )
+                        Text(
+                            text = state.nextSignalAspect.label,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.SansSerif
+                        )
+                        CornerDivider()
+                        val gradeStr = String.format(Locale.US, "%+.1f%%", state.gradientPercent)
+                        Text(
+                            text = "Grade $gradeStr",
+                            color = Color(0xFFE2E8F0),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.SansSerif
+                        )
+                        CornerDivider()
+                        Text(
+                            text = "Cam: ${state.cameraMode.label}",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.SansSerif
                         )
                     }
                 }
 
-                MainNavTab.AI_STUDIO -> {
+                // Top-Right Corner: Camera Cycle, Horn, Time of Day & Livery Studio Toggles
+                CornerHudCard(modifier = Modifier.testTag("hud_top_right_card")) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        CornerHudButton(
+                            label = "Camera (C)",
+                            accent = true,
+                            testTag = "btn_cycle_camera",
+                            onClick = { viewModel.cycleCameraMode() }
+                        )
+                        CornerHudButton(
+                            label = "Horn (H)",
+                            accent = false,
+                            testTag = "btn_sound_horn",
+                            onClick = { viewModel.soundHorn() }
+                        )
+                        CornerHudButton(
+                            label = state.timeOfDay.label,
+                            accent = false,
+                            testTag = "btn_time_of_day",
+                            onClick = { viewModel.cycleTimeOfDay() }
+                        )
+                        CornerHudButton(
+                            label = "AI Livery",
+                            accent = false,
+                            testTag = "btn_open_ai_studio",
+                            onClick = { viewModel.selectTab(MainNavTab.AI_STUDIO) }
+                        )
+                    }
+                }
+            }
+
+            // BOTTOM CORNERS ROW
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                // Bottom-Left Corner: Sleek Speedometer, Throttle, Reverser & Brake Readout
+                CornerHudCard(modifier = Modifier.testTag("hud_bottom_left_card")) {
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(18.dp)
+                    ) {
+                        // Speed Readout (km/h)
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                text = String.format(Locale.US, "%.1f", state.speedKmH),
+                                color = Color.White,
+                                fontSize = 30.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.SansSerif,
+                                modifier = Modifier.testTag("hud_speed_value")
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "km/h",
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.SansSerif,
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                        }
+
+                        // Throttle Indicator
+                        CornerMetricItem(
+                            label = "THROTTLE",
+                            value = "N${state.throttleNotch}",
+                            valueColor = Color(0xFFFBBF24)
+                        )
+
+                        // Reverser Indicator
+                        val revText = when (state.reverser) {
+                            1 -> "FWD"
+                            -1 -> "REV"
+                            else -> "NEU"
+                        }
+                        CornerMetricItem(
+                            label = "REVERSER",
+                            value = revText,
+                            valueColor = Color(0xFF38BDF8)
+                        )
+
+                        // Brake Indicator
+                        val brkPct = state.autoBrakePercent.toInt()
+                        val psi = state.brakePipePsi.toInt()
+                        CornerMetricItem(
+                            label = "BRAKE",
+                            value = "$brkPct% ($psi PSI)",
+                            valueColor = if (brkPct > 0) Color(0xFFF87171) else Color.White
+                        )
+                    }
+                }
+
+                // Bottom-Right Corner: Sleek Interactive Controls (W/S, A/D, Space)
+                CornerHudCard(modifier = Modifier.testTag("hud_bottom_right_card")) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        CornerHudButton(
+                            label = "Throttle - (S)",
+                            accent = false,
+                            testTag = "btn_throttle_down",
+                            onClick = { viewModel.setThrottleNotch(state.throttleNotch - 1) }
+                        )
+                        CornerHudButton(
+                            label = "Throttle + (W)",
+                            accent = true,
+                            testTag = "btn_throttle_up",
+                            onClick = { viewModel.setThrottleNotch(state.throttleNotch + 1) }
+                        )
+                        CornerHudButton(
+                            label = "Rev (A/D)",
+                            accent = false,
+                            testTag = "btn_reverser_toggle",
+                            onClick = {
+                                val nextRev = if (state.reverser == 1) -1 else 1
+                                viewModel.setReverser(nextRev)
+                            }
+                        )
+                        CornerHudButton(
+                            label = if (state.autoBrakePercent > 0f) "Release Brake" else "Brake (Space)",
+                            accent = false,
+                            testTag = "btn_brake_toggle",
+                            onClick = {
+                                val nextBrake = if (state.autoBrakePercent >= 75f) 0f else state.autoBrakePercent + 25f
+                                viewModel.setAutoBrake(nextBrake)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Full-screen modal only if user explicitly opens AI Rail Livery Studio
+        if (state.activeTab == MainNavTab.AI_STUDIO) {
+            Surface(
+                color = RailSurfaceDark.copy(alpha = 0.96f),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "AI Rail Livery & Veo 3.1 Studio",
+                            color = AmberGold,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.SansSerif
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1E293B))
+                                .border(1.dp, RailBorderSteel, RoundedCornerShape(8.dp))
+                                .clickable { viewModel.selectTab(MainNavTab.SIMULATOR) }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .testTag("btn_back_to_3d_sim")
+                        ) {
+                            Text(
+                                text = "Back to 3D Simulator",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.SansSerif
+                            )
+                        }
+                    }
+
                     AiRailStudioScreen(
                         currentImageResult = state.aiImageResult,
                         currentVideoResult = state.aiVideoResult,
@@ -330,157 +407,88 @@ fun IronRailSimApp(viewModel: MainViewModel) {
                         onApplyLiveryFromBitmap = viewModel::applyLiveryFromBitmap
                     )
                 }
-
-                MainNavTab.DOCS_QA -> {
-                    EngineArchitectureDocsScreen(
-                        onLaunchSingleFileWebGlMode = viewModel::launchSingleFileWebGlMode,
-                        onRunSelfTestNow = viewModel::runF9SelfTest
-                    )
-                }
             }
         }
     }
+}
 
-    if (state.showSaveModal) {
-        SaveLoadSlotsDialog(
-            saveSlots = saveSlots,
-            onSaveSlot = { viewModel.saveToSlot(it, isAutoSave = false) },
-            onLoadSlot = viewModel::loadFromSlot,
-            onDismiss = { viewModel.setShowSaveModal(false) }
-        )
+@Composable
+private fun CornerHudCard(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF0F172A).copy(alpha = 0.46f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 9.dp)
+    ) {
+        content()
     }
+}
 
-    if (state.showAccessModal) {
-        AccessibilityDialog(
-            uiScale = state.uiScale,
-            onUiScaleChange = viewModel::setUiScale,
-            reducedMotion = state.reducedMotion,
-            onReducedMotionChange = viewModel::setReducedMotion,
-            subtitlesEnabled = state.subtitlesEnabled,
-            onSubtitlesChange = viewModel::setSubtitlesEnabled,
-            onDismiss = { viewModel.setShowAccessModal(false) }
+@Composable
+private fun CornerHudButton(
+    label: String,
+    accent: Boolean,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    val bgColor = if (accent) Color(0xFFF59E0B).copy(alpha = 0.88f) else Color(0xFF1E293B).copy(alpha = 0.62f)
+    val textColor = if (accent) Color(0xFF0F172A) else Color.White
+    val borderColor = if (accent) Color(0xFFFBBF24) else Color.White.copy(alpha = 0.18f)
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(9.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 7.dp)
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = textColor,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.SansSerif
         )
     }
 }
 
 @Composable
-private fun SaveLoadSlotsDialog(
-    saveSlots: List<SaveSlotEntity>,
-    onSaveSlot: (Int) -> Unit,
-    onLoadSlot: (Int) -> Unit,
-    onDismiss: () -> Unit
+private fun CornerMetricItem(
+    label: String,
+    value: String,
+    valueColor: Color
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = RailSurfaceDark,
-        title = { Text("Deterministic Save Slots (Room DB)", color = AmberGold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Stores PRNG seed, tick count, consist position, and input log for bit-identical replay.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                for (idx in 1..3) {
-                    val existing = saveSlots.firstOrNull { it.slotIndex == idx }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(RailCardDark)
-                            .padding(10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Slot $idx ${if (idx == 1) "(Autosave)" else ""}", style = MaterialTheme.typography.labelLarge, color = CyanTelemetry)
-                            if (existing != null) {
-                                Text(
-                                    "${existing.scenarioId} • Pos ${existing.positionMeters.toInt()}m • Tick ${existing.tickCount}",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            } else {
-                                Text("Empty Slot", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Button(
-                                onClick = { onSaveSlot(idx) },
-                                colors = ButtonDefaults.buttonColors(containerColor = AmberGold, contentColor = Color.Black),
-                                modifier = Modifier.testTag("btn_save_slot_$idx")
-                            ) {
-                                Text("Save", style = MaterialTheme.typography.labelSmall)
-                            }
-                            Button(
-                                onClick = { onLoadSlot(idx) },
-                                enabled = existing != null,
-                                colors = ButtonDefaults.buttonColors(containerColor = SignalGreen, contentColor = Color.Black),
-                                modifier = Modifier.testTag("btn_load_slot_$idx")
-                            ) {
-                                Text("Load", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close", color = AmberGold) }
-        }
-    )
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text(
+            text = label,
+            color = Color(0xFFCBD5E1).copy(alpha = 0.78f),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.SansSerif
+        )
+        Text(
+            text = value,
+            color = valueColor,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.SansSerif
+        )
+    }
 }
 
 @Composable
-private fun AccessibilityDialog(
-    uiScale: Float,
-    onUiScaleChange: (Float) -> Unit,
-    reducedMotion: Boolean,
-    onReducedMotionChange: (Boolean) -> Unit,
-    subtitlesEnabled: Boolean,
-    onSubtitlesChange: (Boolean) -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = RailSurfaceDark,
-        title = { Text("Accessibility & Ergonomics", color = AmberGold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("HUD & Text Scale: ${(uiScale * 100).toInt()}% (75% - 150%)", style = MaterialTheme.typography.labelLarge)
-                Slider(
-                    value = uiScale,
-                    onValueChange = onUiScaleChange,
-                    valueRange = 0.75f..1.50f,
-                    modifier = Modifier.testTag("slider_ui_scale")
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Subtitles for Horn / Bell / Alarms", style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = subtitlesEnabled, onCheckedChange = onSubtitlesChange)
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Reduced Motion (Disable Shake & Smoke)", style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = reducedMotion, onCheckedChange = onReducedMotionChange)
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "Colourblind Signal Shapes Active: Square = Clear Green, Diamond = Caution Yellow, Circle = Stop Red.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = SignalGreen
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Done", color = AmberGold) }
-        }
+private fun CornerDivider() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(12.dp)
+            .background(Color.White.copy(alpha = 0.22f))
     )
 }
