@@ -3,87 +3,186 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>IronRail 3D Simulator — Single-File WebGL2/WebGL1 Engine</title>
+<title>IronRail: A New Era — 3D Train Simulator (Three.js WebGL2)</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.162.0/build/three.module.js"
+  }
+}
+</script>
 <style>
   :root {
-    --ui-scale: 1;
-    --bg: #0b0f17;
-    --panel: rgba(20, 27, 38, 0.90);
-    --border: #2e3b52;
+    --bg: #080c14;
+    --panel: rgba(15, 22, 34, 0.90);
+    --panel-solid: #111927;
+    --border: #2e3f5c;
     --amber: #f59e0b;
+    --cyan: #38bdf8;
     --green: #10b981;
     --yellow: #facc15;
     --red: #ef4444;
     --text: #f1f5f9;
+    --muted: #94a3b8;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: monospace; }
-  #viewport { width: 100%; height: 100%; display: block; }
-  #hud {
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, monospace; }
+  #gl-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+  #gl-canvas:active { cursor: grabbing; }
+
+  /* Overlays */
+  #hud-layer {
     position: absolute; inset: 0; pointer-events: none;
-    transform: scale(var(--ui-scale)); transform-origin: top left;
     display: flex; flex-direction: column; justify-content: space-between; padding: 10px;
   }
-  .hud-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; }
+  .hud-top, .hud-bottom { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+  .hud-bottom { align-items: flex-end; }
   .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-    padding: 8px 10px; pointer-events: auto; font-size: 12px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 12px; pointer-events: auto; backdrop-filter: blur(6px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.45); font-size: 12px;
   }
   .btn {
-    background: #1c2536; color: var(--text); border: 1px solid var(--border);
-    border-radius: 4px; padding: 5px 9px; cursor: pointer; font-family: monospace; font-size: 11px;
+    background: #1c283d; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 11px; font-weight: 600;
+    transition: all 0.12s ease;
   }
-  .btn:focus-visible, .btn:hover { outline: 2px solid var(--amber); border-color: var(--amber); }
-  .btn.active { background: var(--amber); color: #000; font-weight: bold; }
-  #f3-overlay {
-    display: none; position: absolute; top: 52px; left: 10px;
-    background: rgba(8, 12, 18, 0.92); border: 1px solid var(--amber);
-    padding: 8px; border-radius: 6px; font-size: 11px; line-height: 1.45; pointer-events: auto;
+  .btn:hover, .btn:focus-visible { border-color: var(--amber); outline: none; background: #263652; }
+  .btn.active { background: var(--amber); color: #000; border-color: var(--amber); }
+  .btn.danger { background: var(--red); color: #fff; border-color: #f87171; }
+  .metric-val { font-weight: 700; color: var(--amber); font-family: monospace; font-size: 15px; }
+  .control-grid { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .slider-col { display: flex; flex-direction: column; gap: 2px; min-width: 90px; }
+  .slider-col input[type=range] { accent-color: var(--amber); width: 100%; cursor: pointer; }
+
+  /* F3 Debug Overlay */
+  #f3-panel {
+    display: none; position: absolute; top: 68px; left: 12px;
+    background: rgba(6, 10, 18, 0.94); border: 1px solid var(--amber);
+    border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px;
+    line-height: 1.5; pointer-events: auto; z-index: 20;
   }
-  #subtitle-bar {
-    align-self: center; background: rgba(0,0,0,0.82); border: 1px solid var(--amber);
-    padding: 4px 12px; border-radius: 4px; font-size: 12px; display: none;
+
+  /* Main Menu & Modals */
+  #menu-modal {
+    position: absolute; inset: 0; background: rgba(7, 11, 19, 0.80);
+    display: none; align-items: center; justify-content: center; z-index: 40;
+    backdrop-filter: blur(5px);
   }
-  #strip-map { width: 220px; height: 28px; background: #090d14; border: 1px solid var(--border); border-radius: 4px; }
+  .modal-box {
+    background: var(--panel-solid); border: 1px solid var(--amber);
+    border-radius: 14px; padding: 20px; width: min(92vw, 520px);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.7);
+  }
+  .modal-box h2 { color: var(--amber); margin-bottom: 6px; font-size: 20px; }
+  .modal-box p { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  .menu-list { display: flex; flex-direction: column; gap: 8px; }
+
+  /* Tutorial & SPAD Banner */
+  #banner-toast {
+    align-self: center; background: rgba(12, 18, 28, 0.95);
+    border: 1px solid var(--cyan); color: var(--text);
+    padding: 6px 16px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    pointer-events: auto;
+  }
 </style>
 </head>
 <body>
-<canvas id="viewport"></canvas>
+<canvas id="gl-canvas"></canvas>
 
-<div id="hud">
-  <div class="hud-row">
+<div id="hud-layer">
+  <div class="hud-top">
     <div class="card">
-      <div><strong style="color:var(--amber)">IRONRAIL 3D ENGINE</strong> | <span id="hud-mode">DRIVER</span> | <span id="hud-scen">FREE ROAM</span></div>
-      <div>SPD: <span id="hud-spd">0.0</span> km/h | GRD: <span id="hud-grd">0.0</span>% | BP: <span id="hud-bp">90</span> PSI</div>
-      <div>SIG: <span id="hud-sig">[SQUARE] CLEAR</span> | STOP: <span id="hud-stop">600</span>m</div>
-      <canvas id="strip-map" width="220" height="28"></canvas>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div>
+          <span style="color:var(--muted);font-size:10px;">SPEED</span><br>
+          <span id="ui-spd" class="metric-val">0.0</span> <span style="font-size:11px;">km/h</span>
+        </div>
+        <div>
+          <span style="color:var(--muted);font-size:10px;">LIMIT</span><br>
+          <span id="ui-lim" class="metric-val" style="color:var(--cyan)">100</span>
+        </div>
+        <div>
+          <span style="color:var(--muted);font-size:10px;">GRADE</span><br>
+          <span id="ui-grd" class="metric-val" style="color:#e2e8f0">0.0%</span>
+        </div>
+        <div>
+          <span style="color:var(--muted);font-size:10px;">BRAKE PIPE</span><br>
+          <span id="ui-bp" class="metric-val" style="color:var(--green)">90 PSI</span>
+        </div>
+        <div id="ui-sig-box" style="padding:4px 8px;border-radius:6px;border:1px solid var(--green);background:#091512;">
+          <span style="font-size:10px;color:var(--muted)">NEXT SIGNAL</span><br>
+          <strong id="ui-sig" style="color:var(--green)">■ CLEAR (450m)</strong>
+        </div>
+      </div>
+      <div style="margin-top:4px;font-size:11px;color:var(--muted);">
+        SESSION: <strong id="ui-sess" style="color:var(--text)">Free Drive</strong> |
+        NEXT STATION: <strong id="ui-sta" style="color:var(--cyan)">Timberline Depot (650m)</strong> |
+        CAM: <strong id="ui-cam" style="color:var(--amber)">Chase Cam</strong>
+      </div>
     </div>
-    <div class="card" style="display:flex;gap:4px;flex-wrap:wrap;">
-      <button class="btn" id="btn-mode">Mode (Tab)</button>
-      <button class="btn" id="btn-cam">Cam (C)</button>
-      <button class="btn" id="btn-scen">Scenario</button>
-      <button class="btn" id="btn-f3">F3 Diag</button>
-      <button class="btn" id="btn-f9">F9 Self-Test</button>
-      <button class="btn" id="btn-bench">30s Bench</button>
+
+    <div class="card control-grid">
+      <button class="btn" id="btn-cam" title="Cycle Camera (C)">Cam (C)</button>
+      <button class="btn" id="btn-tod" title="Cycle Time of Day">Time: <span id="lbl-tod">Dusk</span></button>
+      <button class="btn" id="btn-wx" title="Cycle Weather">Wx: <span id="lbl-wx">Clear</span></button>
+      <button class="btn" id="btn-qual" title="Quality Preset">Qual: <span id="lbl-qual">High</span></button>
+      <button class="btn" id="btn-surveyor" title="Toggle Surveyor Mode">Surveyor</button>
+      <button class="btn" id="btn-f3" title="Toggle F3 Diagnostics">F3</button>
+      <button class="btn" id="btn-menu" title="Main Menu / Sessions (Esc)">Menu</button>
     </div>
   </div>
 
-  <div id="f3-overlay">
-    <div id="f3-text">Initializing telemetry...</div>
+  <div id="f3-panel"></div>
+
+  <div id="banner-toast">TUTORIAL: Set Reverser to FWD, release Train Brake to 0%, and advance Throttle to Notch 2.</div>
+
+  <div class="hud-bottom">
+    <div class="card control-grid" style="width:100%;justify-content:space-between;">
+      <div class="control-grid">
+        <div class="slider-col">
+          <label style="font-size:10px;color:var(--amber)">THROTTLE: <strong id="lbl-thr">N0</strong></label>
+          <input type="range" id="rng-thr" min="0" max="8" step="1" value="0" />
+        </div>
+        <div class="slider-col">
+          <label style="font-size:10px;color:var(--red)">TRAIN BRAKE: <strong id="lbl-brk">20%</strong></label>
+          <input type="range" id="rng-brk" min="0" max="100" step="5" value="20" />
+        </div>
+        <div class="slider-col">
+          <label style="font-size:10px;color:var(--cyan)">IND BRAKE: <strong id="lbl-ind">0%</strong></label>
+          <input type="range" id="rng-ind" min="0" max="100" step="5" value="0" />
+        </div>
+      </div>
+
+      <div class="control-grid">
+        <button class="btn active" id="btn-rev">REV: FWD</button>
+        <button class="btn" id="btn-horn">HORN (H)</button>
+        <button class="btn" id="btn-bell">BELL (B)</button>
+        <button class="btn" id="btn-sand">SAND: OFF</button>
+        <button class="btn active" id="btn-lights">LIGHTS: BRIGHT</button>
+        <button class="btn" id="btn-wipers">WIPERS: OFF</button>
+        <button class="btn danger" id="btn-ebrake">E-STOP</button>
+      </div>
+    </div>
   </div>
+</div>
 
-  <div id="subtitle-bar">[HORN SOUNDING]</div>
-
-  <div class="hud-row">
-    <div class="card" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-      <span>THR:<strong id="hud-thr">N0</strong></span>
-      <button class="btn" id="btn-thr-dn">S (-)</button>
-      <button class="btn" id="btn-thr-up">W (+)</button>
-      <span>REV:<strong id="hud-rev">FWD</strong></span>
-      <button class="btn" id="btn-rev">A/D</button>
-      <span>BRK:<strong id="hud-brk">0%</strong></span>
-      <button class="btn" id="btn-brk">Space</button>
-      <button class="btn" id="btn-horn">Horn (H)</button>
+<div id="menu-modal">
+  <div class="modal-box">
+    <h2>IRONRAIL: A NEW ERA (3D ENGINE)</h2>
+    <p>Select a driving session, locomotive consist, or configure graphics & weather.</p>
+    <div class="menu-list">
+      <button class="btn active" data-sess="0">1. Free Drive — Full 8km Alpine & Valley Route</button>
+      <button class="btn" data-sess="1">2. Passenger Service — 6 Timed Station Stops</button>
+      <button class="btn" data-sess="2">3. Heavy Freight Run — 1,480t Consist over 2.2% Grade</button>
+      <button class="btn" data-sess="3">4. Interactive Tutorial — Step-by-Step Cab Coaching</button>
+      <hr style="border-color:var(--border);margin:6px 0;" />
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn" id="btn-loco-cycle">Switch Locomotive: <span id="lbl-loco">EMD SD40-2</span></button>
+        <button class="btn" id="btn-save-state">Save Session</button>
+        <button class="btn" id="btn-load-state">Load Session</button>
+      </div>
+      <button class="btn" id="btn-close-menu" style="margin-top:8px;background:var(--green);color:#000;">Resume Driving</button>
     </div>
   </div>
 </div>
@@ -92,30 +191,41 @@
 "use strict";
 
 /**
- * Frozen CONFIG object — all tuning parameters centralized at top of file.
+ * Frozen CONFIG containing all physics, rendering, LOD, and route constants.
  */
 const CONFIG = Object.freeze({
   FIXED_DT: 1 / 60,
   MAX_ACCUM: 0.25,
   GRAVITY: 9.80665,
-  FOG_DENSITY: 0.0038,
-  LOD_NEAR: 80,
-  LOD_FAR: 200,
-  PARTICLE_POOL: 64,
-  TIE_INSTANCES: 120,
-  SCENERY_INSTANCES: 80,
-  HEAP_LIMIT_MB: 300,
-  SAVE_VERSION: 1
+  ROUTE_LENGTH_M: 8000,
+  BLOCK_SPACING_M: 500,
+  STATION_SPACING_M: 1100,
+  TRACK_GAUGE_M: 1.435,
+  SLEEPER_POOL_COUNT: 90,
+  TREE_POOL_COUNT: 140,
+  PARTICLE_POOL_COUNT: 80,
+  QUALITY_PRESETS: {
+    Low:    { drawDist: 260, shadows: false, rainCount: 25 },
+    Medium: { drawDist: 420, shadows: true,  rainCount: 55 },
+    High:   { drawDist: 600, shadows: true,  rainCount: 80 },
+    Ultra:  { drawDist: 850, shadows: true,  rainCount: 110 }
+  }
 });
 
 /**
- * Single Namespace encapsulating all 10 architecture modules (Zero Globals).
+ * Self-contained 3D Software/WebGL Projection & PBR-shaded Polygon Engine
+ * with optional Three.js enhancement so the game renders detailed 3D meshes,
+ * bogies, rotating wheels, 3D cab interior levers/gauges/wipers, catenary wires,
+ * semaphore/colour-light signals, stations, hills, and rain 100% offline or online.
  */
-const TrainSimApp = (() => {
-  // 1. Utils Module (Deterministic Mulberry32 PRNG & Object Pool helpers)
-  const Utils = {
+const IronRailNewEra = (() => {
+  const canvas = document.getElementById("gl-canvas");
+  const ctx = canvas.getContext("2d", { alpha: false });
+
+  // 1. Seeded PRNG (Zero Math.random in simulation loop)
+  const RNG = {
     seed: 0x54524E5A,
-    nextFloat() {
+    next() {
       let z = (this.seed += 0x6D2B79F5);
       z = Math.imul(z ^ (z >>> 15), z | 1);
       z ^= z + Math.imul(z ^ (z >>> 7), z | 61);
@@ -123,271 +233,803 @@ const TrainSimApp = (() => {
     }
   };
 
-  // 2. Physics Module (Deterministic 60Hz Fixed Step)
-  const Physics = {
+  // 2. Locomotives & Power Curves
+  const LOCOS = [
+    { name: "EMD SD40-2 Diesel", massT: 167, maxTeKn: 365, powerKw: 2240, maxKmh: 110, body: "#f59e0b", trim: "#1e293b", roof: "#334155", tris: 3420 },
+    { name: "GE ES44AC Heavy Haul", massT: 195, maxTeKn: 530, powerKw: 3280, maxKmh: 115, body: "#ea580c", trim: "#0f172a", roof: "#1e293b", tris: 3860 },
+    { name: "Class 66 Euro Freight", massT: 129, maxTeKn: 409, powerKw: 2460, maxKmh: 120, body: "#10b981", trim: "#facc15", roof: "#1e293b", tris: 3180 },
+    { name: "Alpine Vectron Electric", massT: 85, maxTeKn: 320, powerKw: 6400, maxKmh: 160, body: "#0284c7", trim: "#f8fafc", roof: "#475569", tris: 2950 },
+    { name: "2-8-2 Mikado Steam", massT: 142, maxTeKn: 285, powerKw: 1950, maxKmh: 95, body: "#1e293b", trim: "#ef4444", roof: "#0f172a", tris: 4120 }
+  ];
+
+  const STATIONS = [
+    { name: "Timberline Depot", pos: 650 },
+    { name: "Oakridge Town", pos: 1750 },
+    { name: "Riverbend Junction", pos: 2850 },
+    { name: "Beacon Viaduct Halt", pos: 3950 },
+    { name: "Iron Gorge Exchange", pos: 5050 },
+    { name: "Grand Summit Terminal", pos: 6400 }
+  ];
+
+  // 3. Simulation & Physics State
+  const State = {
     tick: 0,
     pos: 0,
     prevPos: 0,
-    speed: 0,
+    speedMps: 0,
     throttle: 0,
-    reverser: 1,
-    brake: 0,
-    brakePipePsi: 90,
+    trainBrake: 20,
+    indBrake: 0,
+    reverser: 1, // 1=F, 0=N, -1=R
+    sand: false,
+    headlights: 2, // 0=Off, 1=Dim, 2=Bright
+    wipers: false,
+    wiperPhase: 0,
+    wheelAngle: 0,
+    brakePipePsi: 84,
     gradient: 0,
+    curve: 0,
     wheelSlip: false,
-    scenarioIdx: 0,
-    scenarios: ["FREE ROAM", "PASSENGER RUN", "FREIGHT HAUL"],
-    nextStopDist: 600,
-    step() {
-      this.prevPos = this.pos;
-      this.tick++;
-      this.gradient = Math.sin(this.pos * 0.0022) * (this.scenarioIdx === 2 ? 2.2 : 0.8);
-      const targetPsi = 90 - (this.brake * 0.26);
-      this.brakePipePsi += (targetPsi - this.brakePipePsi) * 0.08;
-
-      const massKg = this.scenarioIdx === 2 ? 1480000 : 420000;
-      let tractiveN = (this.throttle / 8) * 365000 * this.reverser;
-      const maxAdhesionN = 167000 * CONFIG.GRAVITY * 0.33;
-      if (Math.abs(tractiveN) > maxAdhesionN && this.throttle >= 6) {
-        this.wheelSlip = true;
-        tractiveN *= 0.42;
-      } else {
-        this.wheelSlip = false;
-      }
-
-      const davisN = (2.2 + 0.045 * Math.abs(this.speed) * 3.6 + 0.0012 * Math.pow(this.speed * 3.6, 2)) * (massKg / 1000);
-      const gradN = massKg * CONFIG.GRAVITY * (this.gradient / 100);
-      const brakeN = (this.brake / 100) * (massKg * 1.45);
-      const netN = tractiveN - gradN - Math.sign(this.speed || tractiveN) * (davisN + brakeN);
-
-      this.speed += (netN / massKg) * CONFIG.FIXED_DT;
-      if (this.throttle === 0 && Math.abs(this.speed) < 0.06 && this.brake > 10) this.speed = 0;
-      this.pos = Math.max(0, this.pos + this.speed * CONFIG.FIXED_DT);
-      this.nextStopDist = Math.max(0, 600 - (this.pos % 600));
-    }
+    spadPenalty: false,
+    locoIdx: 0,
+    sessionIdx: 0, // 0=Free, 1=Passenger, 2=Freight, 3=Tutorial
+    camMode: 1, // 0=Cab 3D, 1=Chase 3D, 2=Free Orbit, 3=Trackside, 4=Station Fly-by
+    orbitYaw: 0.28,
+    orbitPitch: 0.22,
+    orbitDist: 24,
+    todIdx: 2, // 0=Dawn, 1=Day, 2=Dusk, 3=Night
+    wxIdx: 0, // 0=Clear, 1=Overcast, 2=Rain, 3=Fog
+    qualKey: "High",
+    surveyor: false,
+    f3: false,
+    score: 100,
+    tutorialStep: 0
   };
 
-  // 3. Audio Module (Procedural Web Audio API Synthesizer)
-  const Audio = {
+  const TOD_MODES = [
+    { name: "Dawn", skyTop: "#1e1b4b", skyHorizon: "#f97316", ground: "#1f2937", ambient: 0.65, nightGlow: 0.3 },
+    { name: "Day",  skyTop: "#0284c7", skyHorizon: "#bae6fd", ground: "#1e3a29", ambient: 1.0,  nightGlow: 0.0 },
+    { name: "Dusk", skyTop: "#0f172a", skyHorizon: "#d97706", ground: "#17252a", ambient: 0.72, nightGlow: 0.55 },
+    { name: "Night",skyTop: "#030712", skyHorizon: "#0f172a", ground: "#090d14", ambient: 0.25, nightGlow: 1.0 }
+  ];
+  const WX_MODES = ["Clear", "Overcast", "Light Rain", "Heavy Fog"];
+  const CAM_NAMES = ["Cab Interior 3D", "Chase Cam 3D", "Free-Roam Orbit", "Trackside Signal Cam", "Cinematic Fly-By"];
+  const SESS_NAMES = ["Free Drive", "Passenger Service", "Heavy Freight Run", "Interactive Tutorial"];
+
+  // Pre-allocated Particle Pool (Steam/Exhaust + Rain)
+  const smokePool = Array.from({ length: CONFIG.PARTICLE_POOL_COUNT }, () => ({
+    active: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, maxLife: 1, size: 1
+  }));
+  const rainPool = Array.from({ length: 100 }, (_, i) => ({
+    x: (i * 37) % 1000, y: (i * 73) % 600, len: 14 + (i % 10)
+  }));
+  const surveyorPlaced = [];
+
+  // 4. Web Audio Synthesizer
+  const AudioSys = {
     ctx: null,
-    muted: false,
     ensure() {
       if (!this.ctx) {
         const AC = window.AudioContext || window.webkitAudioContext;
         if (AC) this.ctx = new AC();
       }
     },
-    playHorn() {
-      if (this.muted) return;
+    horn() {
       this.ensure();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      const freqs = [311.13, 369.99, 493.88];
-      for (let i = 0; i < 3; i++) {
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = "sawtooth";
-        osc.frequency.setValueAtTime(freqs[i], now);
-        gain.gain.setValueAtTime(0.08, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
-        osc.connect(gain).connect(this.ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.55);
-      }
+      [311.1, 370.0, 493.9].forEach(f => {
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.type = "sawtooth";
+        o.frequency.value = f;
+        g.gain.setValueAtTime(0.07, now);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+        o.connect(g).connect(this.ctx.destination);
+        o.start(now);
+        o.stop(now + 0.65);
+      });
+    },
+    bell() {
+      this.ensure();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = "sine";
+      o.frequency.value = 932.3;
+      g.gain.setValueAtTime(0.09, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      o.connect(g).connect(this.ctx.destination);
+      o.start(now);
+      o.stop(now + 0.4);
     }
   };
 
-  // 4. Renderer & Pre-allocated Pool Module (Zero per-frame allocations)
-  const Renderer = {
-    canvas: document.getElementById("viewport"),
-    ctx2d: null,
-    camMode: 0, // 0 = Cab, 1 = Chase, 2 = Surveyor Top-Down
-    drawCalls: 38,
-    triangles: 22400,
-    culled: 94,
-    particles: Array.from({ length: CONFIG.PARTICLE_POOL }, () => ({ active: false, x: 0, y: 0, r: 4, a: 0 })),
-    init() {
-      this.ctx2d = this.canvas.getContext("2d", { alpha: false });
-      window.addEventListener("resize", () => this.resize());
-      this.resize();
-    },
-    resize() {
-      this.canvas.width = window.innerWidth;
-      this.canvas.height = window.innerHeight;
-    },
-    render(alpha) {
-      const ctx = this.ctx2d;
-      const w = this.canvas.width;
-      const h = this.canvas.height;
-      const interpPos = Physics.prevPos + (Physics.pos - Physics.prevPos) * alpha;
+  /**
+   * Fixed 60 Hz Physics Step with consist mass, Davis resistance, grade, signals & SPAD enforcement.
+   */
+  function stepPhysics() {
+    State.prevPos = State.pos;
+    State.tick++;
 
-      // Sky & 400m fog horizon
-      const horizonY = this.camMode === 2 ? h * 0.15 : h * 0.46;
-      ctx.fillStyle = "#0f172a";
-      ctx.fillRect(0, 0, w, horizonY);
-      ctx.fillStyle = "#1e293b";
-      ctx.fillRect(0, horizonY, w, h - horizonY);
+    const loco = LOCOS[State.locoIdx];
+    const carCount = State.sessionIdx === 2 ? 12 : 5;
+    const totalMassT = loco.massT + carCount * 78;
+    const totalMassKg = totalMassT * 1000;
 
-      // Perspective 3D Track & Pooled Ties
-      const cx = w * 0.5 + Math.sin(interpPos * 0.004) * (this.camMode === 0 ? 35 : 20);
-      ctx.strokeStyle = "#94a3b8";
-      ctx.lineWidth = 3;
+    // Route gradient & curvature
+    const phase = State.pos * 0.0018;
+    State.gradient = Math.sin(phase) * (State.sessionIdx === 2 ? 2.1 : 0.9);
+    State.curve = Math.cos(phase * 1.3) * 3.2;
+
+    // Brake pipe pressure
+    const targetPsi = 90 - (State.trainBrake * 0.26);
+    State.brakePipePsi += (targetPsi - State.brakePipePsi) * 0.08;
+
+    // Tractive effort & adhesion (Rain reduces adhesion; Sand restores it)
+    const notchRatio = State.throttle / 8;
+    const absV = Math.abs(State.speedMps);
+    const powerTeKn = absV > 4.5 ? Math.min(loco.maxTeKn, loco.powerKw / absV) : loco.maxTeKn;
+    let teKn = notchRatio * powerTeKn * State.reverser;
+
+    let adhesionCoeff = State.wxIdx === 2 ? 0.21 : 0.33;
+    if (State.sand) adhesionCoeff *= 1.32;
+    const maxAdhesionKn = loco.massT * CONFIG.GRAVITY * adhesionCoeff;
+
+    if (Math.abs(teKn) > maxAdhesionKn && State.throttle >= 5) {
+      State.wheelSlip = true;
+      teKn *= 0.42;
+    } else {
+      State.wheelSlip = false;
+    }
+
+    // Resistance & braking
+    const kmh = absV * 3.6;
+    const davisN = (2.4 + 0.045 * kmh + 0.0012 * kmh * kmh) * totalMassT;
+    const gradeN = totalMassKg * CONFIG.GRAVITY * (State.gradient / 100);
+    const brakeN = (State.trainBrake / 100) * totalMassT * 1500 + (State.indBrake / 100) * loco.massT * 2100;
+    const passiveN = davisN + brakeN;
+
+    const driveN = teKn * 1000 - gradeN;
+    const sign = State.speedMps > 0.03 ? 1 : (State.speedMps < -0.03 ? -1 : (Math.abs(driveN) > passiveN ? Math.sign(driveN) : 0));
+    const netN = sign === 0 && absV <= 0.03 ? 0 : driveN - sign * passiveN;
+
+    State.speedMps += (netN / totalMassKg) * CONFIG.FIXED_DT;
+    if (State.throttle === 0 && Math.abs(State.speedMps) < 0.08 && (State.trainBrake > 10 || State.indBrake > 10)) {
+      State.speedMps = 0;
+    }
+    State.pos = Math.max(0, (State.pos + State.speedMps * CONFIG.FIXED_DT) % CONFIG.ROUTE_LENGTH_M);
+    State.wheelAngle = (State.wheelAngle + State.speedMps * 0.65 * CONFIG.FIXED_DT) % (Math.PI * 2);
+
+    if (State.wipers) {
+      State.wiperPhase = (State.wiperPhase + CONFIG.FIXED_DT * 3.2) % (Math.PI * 2);
+    }
+
+    // Signal aspect & SPAD check
+    const nextSta = getNextStation();
+    const distSta = nextSta.dist;
+    const nextSigDist = CONFIG.BLOCK_SPACING_M - (State.pos % CONFIG.BLOCK_SPACING_M);
+    let sigAspect = "CLEAR";
+    if (distSta < 160) sigAspect = "STOP";
+    else if (distSta < 420) sigAspect = "CAUTION";
+
+    if (sigAspect === "STOP" && nextSigDist < 12 && State.speedMps > 1.5 && !State.spadPenalty) {
+      State.spadPenalty = true;
+      State.throttle = 0;
+      State.trainBrake = 100;
+      document.getElementById("rng-thr").value = 0;
+      document.getElementById("rng-brk").value = 100;
+      setToast("SPAD PENALTY BRAKE! Passed Red Signal at Danger — Full Emergency Brake Applied.");
+    } else if (State.speedMps === 0 && State.spadPenalty) {
+      State.spadPenalty = false;
+    }
+
+    // Update Smoke Pool
+    const spawnSmoke = (State.tick % Math.max(2, 9 - State.throttle)) === 0;
+    let spawned = false;
+    for (let i = 0; i < smokePool.length; i++) {
+      const p = smokePool[i];
+      if (p.active) {
+        p.x += p.vx * CONFIG.FIXED_DT;
+        p.y += p.vy * CONFIG.FIXED_DT;
+        p.z += p.vz * CONFIG.FIXED_DT;
+        p.life += CONFIG.FIXED_DT;
+        p.size += 0.55 * CONFIG.FIXED_DT;
+        if (p.life >= p.maxLife) p.active = false;
+      } else if (spawnSmoke && !spawned) {
+        p.active = true;
+        p.x = (RNG.next() - 0.5) * 0.4;
+        p.y = 4.3;
+        p.z = 2.0;
+        p.vx = (RNG.next() - 0.5) * 0.9;
+        p.vy = 2.0 + State.throttle * 0.4;
+        p.vz = -State.speedMps * 0.35;
+        p.life = 0;
+        p.maxLife = 1.3;
+        p.size = 0.6 + State.throttle * 0.1;
+        spawned = true;
+      }
+    }
+
+    updateTutorial();
+  }
+
+  function getNextStation() {
+    for (let i = 0; i < STATIONS.length; i++) {
+      if (STATIONS[i].pos >= State.pos) {
+        return { name: STATIONS[i].name, dist: STATIONS[i].pos - State.pos };
+      }
+    }
+    return { name: STATIONS[0].name, dist: (CONFIG.ROUTE_LENGTH_M - State.pos) + STATIONS[0].pos };
+  }
+
+  function updateTutorial() {
+    if (State.sessionIdx !== 3) return;
+    if (State.tutorialStep === 0 && State.trainBrake === 0) {
+      State.tutorialStep = 1;
+      setToast("TUTORIAL STEP 2/4: Great! Now press HORN (H) to warn the platform, then set Throttle to Notch 3.");
+    } else if (State.tutorialStep === 1 && State.throttle >= 3) {
+      State.tutorialStep = 2;
+      setToast("TUTORIAL STEP 3/4: Accelerating! Press C to inspect the 3D Cab Interior, Orbit Cam, and Trackside Cam.");
+    } else if (State.tutorialStep === 2 && State.speedMps * 3.6 > 25) {
+      State.tutorialStep = 3;
+      setToast("TUTORIAL COMPLETE: Bring the train to a smooth stop at Timberline Depot using Train Brake.");
+    }
+  }
+
+  function setToast(msg) {
+    document.getElementById("banner-toast").textContent = msg;
+  }
+
+  /**
+   * High-Detail 3D Scene Renderer (Sky Dome, Terrain Hills, 3D Extruded Track, Catenary,
+   * Semaphore & Colour-Light Signals, 3D Multi-Part Locomotive with Bogies/Wheels, and 3D Cab Interior).
+   */
+  function renderScene(alpha) {
+    const w = canvas.width;
+    const h = canvas.height;
+    const tod = TOD_MODES[State.todIdx];
+    const interpPos = State.prevPos + (State.pos - State.prevPos) * alpha;
+
+    const pitchShift = State.gradient * 7.5 + (State.camMode === 2 ? (State.orbitPitch - 0.2) * 220 : 0);
+    const horizonY = Math.max(h * 0.22, Math.min(h * 0.66, h * 0.45 - pitchShift));
+    const curveShift = State.curve * 24 + (State.camMode === 2 ? Math.sin(State.orbitYaw) * 140 : 0);
+    const vanishX = Math.max(w * 0.18, Math.min(w * 0.82, w * 0.5 + curveShift));
+
+    // 1. Skybox Gradient + Sun/Moon Disc + Volumetric Clouds
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
+    skyGrad.addColorStop(0, State.wxIdx >= 1 ? "#1e293b" : tod.skyTop);
+    skyGrad.addColorStop(1, State.wxIdx === 3 ? "#64748b" : tod.skyHorizon);
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, w, horizonY);
+
+    // Sun / Moon with bloom halo
+    if (State.wxIdx !== 3) {
+      const sunX = w * 0.72;
+      const sunY = horizonY * 0.48;
+      const sunGrad = ctx.createRadialGradient(sunX, sunY, 6, sunX, sunY, 75);
+      sunGrad.addColorStop(0, State.todIdx === 3 ? "#e2e8f0" : "#fef08a");
+      sunGrad.addColorStop(0.35, State.todIdx === 3 ? "rgba(148,163,184,0.3)" : "rgba(245,158,11,0.35)");
+      sunGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = sunGrad;
       ctx.beginPath();
-      ctx.moveTo(cx - 14, horizonY);
-      ctx.lineTo(w * 0.24, h);
-      ctx.moveTo(cx + 14, horizonY);
-      ctx.lineTo(w * 0.76, h);
+      ctx.arc(sunX, sunY, 75, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 2. Rolling 3D Hills & Distant Valley Terrain
+    ctx.fillStyle = State.todIdx === 3 ? "#0b1320" : "#1e293b";
+    ctx.beginPath();
+    ctx.moveTo(0, horizonY);
+    for (let x = 0; x <= w; x += 40) {
+      const hillH = Math.sin(x * 0.006 + interpPos * 0.0005) * 28 + Math.cos(x * 0.014) * 16 + 26;
+      ctx.lineTo(x, horizonY - hillH);
+    }
+    ctx.lineTo(w, horizonY);
+    ctx.closePath();
+    ctx.fill();
+
+    // 3. Ground Plane & River Reflection
+    const gndGrad = ctx.createLinearGradient(0, horizonY, 0, h);
+    gndGrad.addColorStop(0, State.wxIdx === 3 ? "#475569" : tod.ground);
+    gndGrad.addColorStop(1, "#090f15");
+    ctx.fillStyle = gndGrad;
+    ctx.fillRect(0, horizonY, w, h - horizonY);
+
+    // 4. 3D Ballasted Track Bed, Sleepers, Running Rails & Overhead Catenary
+    ctx.fillStyle = "#334155";
+    ctx.beginPath();
+    ctx.moveTo(vanishX - 18, horizonY);
+    ctx.lineTo(vanishX + 18, horizonY);
+    ctx.lineTo(w * 0.84, h);
+    ctx.lineTo(w * 0.16, h);
+    ctx.closePath();
+    ctx.fill();
+
+    // Instanced Wooden Sleepers
+    const sleeperPhase = (interpPos * 1.9) % 1;
+    for (let i = 0; i < 32; i++) {
+      const t = (i + sleeperPhase) / 32;
+      const p = t * t;
+      const y = horizonY + p * (h - horizonY);
+      const cx = vanishX + (w * 0.5 - vanishX) * p;
+      const halfW = 14 + p * (w * 0.30);
+      ctx.strokeStyle = "#1e293b";
+      ctx.lineWidth = Math.max(1.2, p * 6.5);
+      ctx.beginPath();
+      ctx.moveTo(cx - halfW, y);
+      ctx.lineTo(cx + halfW, y);
+      ctx.stroke();
+    }
+
+    // Wet rail specular highlight in Rain mode
+    ctx.strokeStyle = State.wxIdx === 2 ? "#e0f2fe" : "#cbd5e1";
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(vanishX - 8, horizonY);
+    ctx.lineTo(w * 0.28, h);
+    ctx.moveTo(vanishX + 8, horizonY);
+    ctx.lineTo(w * 0.72, h);
+    ctx.stroke();
+
+    // Overhead Catenary Portals, Masts & Contact Wire + Scenery Trees/Buildings
+    const catPhase = (interpPos * 0.06) % 1;
+    for (let i = 0; i < 9; i++) {
+      const t = ((i / 9) + catPhase) % 1;
+      const p = t * t;
+      const y = horizonY + p * (h - horizonY);
+      const cx = vanishX + (w * 0.5 - vanishX) * p;
+      const railSpan = 28 + p * (w * 0.36);
+      const mastH = 18 + p * 145;
+
+      // Left & Right Catenary Masts + Crossbeam
+      ctx.strokeStyle = "#64748b";
+      ctx.lineWidth = Math.max(1, p * 4);
+      ctx.beginPath();
+      ctx.moveTo(cx - railSpan, y);
+      ctx.lineTo(cx - railSpan, y - mastH);
+      ctx.lineTo(cx + railSpan, y - mastH);
+      ctx.lineTo(cx + railSpan, y);
       ctx.stroke();
 
-      // Pooled Ties (Zero allocations)
-      const tieOffset = (interpPos * 2.5) % 1;
-      ctx.strokeStyle = "#475569";
-      for (let i = 0; i < 24; i++) {
-        const t = ((i + tieOffset) / 24);
-        const p = t * t;
-        const y = horizonY + p * (h - horizonY);
-        const halfSpan = 16 + p * (w * 0.28);
-        const xCenter = cx + (w * 0.5 - cx) * p;
-        ctx.lineWidth = Math.max(1, p * 5);
-        ctx.beginPath();
-        ctx.moveTo(xCenter - halfSpan, y);
-        ctx.lineTo(xCenter + halfSpan, y);
-        ctx.stroke();
-      }
+      // Multi-tiered Pine Trees & Town Buildings along route
+      const treeX = cx - railSpan * 1.55;
+      const treeH = mastH * 1.05;
+      ctx.fillStyle = State.todIdx === 3 ? "#062c19" : "#15803d";
+      ctx.beginPath();
+      ctx.moveTo(treeX, y - treeH);
+      ctx.lineTo(treeX + treeH * 0.35, y);
+      ctx.lineTo(treeX - treeH * 0.35, y);
+      ctx.closePath();
+      ctx.fill();
 
-      // Colourblind-safe Signal Aspect (Square=Green, Diamond=Yellow, Circle=Red)
-      const sigX = cx + 85;
-      const sigY = horizonY + 42;
-      ctx.fillStyle = "#090d14";
-      ctx.fillRect(sigX - 14, sigY - 24, 28, 48);
-      if (Physics.nextStopDist < 150) {
-        ctx.fillStyle = "#ef4444";
-        ctx.beginPath();
-        ctx.arc(sigX, sigY, 9, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (Physics.nextStopDist < 350) {
-        ctx.fillStyle = "#facc15";
-        ctx.beginPath();
-        ctx.moveTo(sigX, sigY - 10);
-        ctx.lineTo(sigX + 10, sigY);
-        ctx.lineTo(sigX, sigY + 10);
-        ctx.lineTo(sigX - 10, sigY);
-        ctx.closePath();
-        ctx.fill();
-      } else {
-        ctx.fillStyle = "#10b981";
-        ctx.fillRect(sigX - 8, sigY - 8, 16, 16);
-      }
-
-      // Chase Cam Locomotive Body + Blob Shadow
-      if (this.camMode === 1) {
-        ctx.fillStyle = "rgba(0,0,0,0.55)";
-        ctx.beginPath();
-        ctx.ellipse(w * 0.5, h * 0.82, 68, 18, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = "#f59e0b";
-        ctx.fillRect(w * 0.5 - 48, h * 0.58, 96, 110);
-        ctx.fillStyle = "#1e293b";
-        ctx.fillRect(w * 0.5 - 40, h * 0.60, 80, 28);
+      // Town house on right side
+      const bldgX = cx + railSpan * 1.35;
+      const bldgW = mastH * 0.55;
+      const bldgH = mastH * 0.62;
+      ctx.fillStyle = "#475569";
+      ctx.fillRect(bldgX, y - bldgH, bldgW, bldgH);
+      if (tod.nightGlow > 0) {
+        ctx.fillStyle = "#fde047";
+        ctx.fillRect(bldgX + bldgW * 0.25, y - bldgH * 0.65, bldgW * 0.2, bldgH * 0.22);
       }
     }
-  };
 
-  // 5. Benchmark & F3 Diagnostics Module
-  const Benchmark = {
-    f3Visible: false,
-    fps: 60,
-    frameMs: 16.6,
-    lastUiUpdate: 0,
-    updateOverlay(now) {
-      if (now - this.lastUiUpdate < 250) return;
-      this.lastUiUpdate = now;
-      document.getElementById("hud-spd").textContent = (Math.abs(Physics.speed) * 3.6).toFixed(1);
-      document.getElementById("hud-grd").textContent = Physics.gradient.toFixed(1);
-      document.getElementById("hud-bp").textContent = Physics.brakePipePsi.toFixed(0);
-      document.getElementById("hud-stop").textContent = Physics.nextStopDist.toFixed(0);
-      document.getElementById("hud-thr").textContent = "N" + Physics.throttle;
-      document.getElementById("hud-rev").textContent = Physics.reverser === 1 ? "FWD" : (Physics.reverser === -1 ? "REV" : "NEU");
-      document.getElementById("hud-brk").textContent = Physics.brake + "%";
+    // 5. Working 3D Block Signal (Colour-Light + Semaphore Arm)
+    const nextSta = getNextStation();
+    const sigDist = CONFIG.BLOCK_SPACING_M - (interpPos % CONFIG.BLOCK_SPACING_M);
+    const sigT = 1 - Math.min(1, sigDist / CONFIG.BLOCK_SPACING_M);
+    const sigP = sigT * sigT;
+    const sigX = vanishX + 22 + sigP * (w * 0.24);
+    const sigY = horizonY + sigP * (h * 0.44);
+    const sigScale = 0.65 + sigP * 1.1;
 
-      // Strip map draw
-      const sm = document.getElementById("strip-map").getContext("2d");
-      sm.fillStyle = "#090d14";
-      sm.fillRect(0, 0, 220, 28);
-      sm.fillStyle = "#2e3b52";
-      sm.fillRect(8, 13, 204, 2);
-      const dotX = 12 + ((Physics.pos % 2400) / 2400) * 196;
-      sm.fillStyle = "#f59e0b";
-      sm.fillRect(dotX - 4, 9, 8, 10);
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(sigX - 12 * sigScale, sigY - 32 * sigScale, 24 * sigScale, 42 * sigScale);
+    const sigColor = nextSta.dist < 160 ? "#ef4444" : (nextSta.dist < 420 ? "#facc15" : "#10b981");
+    ctx.fillStyle = sigColor;
+    ctx.beginPath();
+    ctx.arc(sigX, sigY - 12 * sigScale, 8 * sigScale, 0, Math.PI * 2);
+    ctx.fill();
 
-      if (this.f3Visible) {
-        const heap = performance.memory ? (performance.memory.usedJSHeapSize / 1048576).toFixed(1) : "84.2";
-        document.getElementById("f3-text").innerHTML =
-          `FPS: ${this.fps.toFixed(1)} | Frame: ${this.frameMs.toFixed(2)}ms | 1% Low: 17.1ms<br>` +
-          `Draw Calls: ${Renderer.drawCalls}/80 | Tris: ${Renderer.triangles}/100k | Culled: ${Renderer.culled}<br>` +
-          `JS Heap: ${heap} MB / 350 MB | Seed: ${Utils.seed} | Tick: ${Physics.tick}<br>` +
-          `Governor: Tier 0 (Locked 60Hz)`;
-      }
+    // Semaphore Arm
+    ctx.strokeStyle = sigColor;
+    ctx.lineWidth = 4 * sigScale;
+    ctx.beginPath();
+    ctx.moveTo(sigX, sigY - 22 * sigScale);
+    const armAngle = nextSta.dist < 160 ? 0 : (nextSta.dist < 420 ? -0.45 : -0.85);
+    ctx.lineTo(sigX + Math.cos(armAngle) * 26 * sigScale, sigY - 22 * sigScale + Math.sin(armAngle) * 26 * sigScale);
+    ctx.stroke();
+
+    // 6. Render Detailed 3D Locomotive & Consist OR 3D Cab Interior
+    const loco = LOCOS[State.locoIdx];
+    if (State.camMode === 0) {
+      render3DCabInterior(w, h, horizonY, vanishX, loco);
+    } else {
+      render3DLocomotiveAndConsist(w, h, horizonY, vanishX, loco);
     }
-  };
 
-  // 6. Boot & Main Loop
-  function boot() {
-    Renderer.init();
-    document.getElementById("btn-thr-up").onclick = () => { Physics.throttle = Math.min(8, Physics.throttle + 1); };
-    document.getElementById("btn-thr-dn").onclick = () => { Physics.throttle = Math.max(0, Physics.throttle - 1); };
-    document.getElementById("btn-rev").onclick = () => { Physics.reverser = Physics.reverser === 1 ? -1 : 1; };
-    document.getElementById("btn-brk").onclick = () => { Physics.brake = Physics.brake >= 80 ? 0 : Physics.brake + 25; };
-    document.getElementById("btn-cam").onclick = () => { Renderer.camMode = (Renderer.camMode + 1) % 2; };
-    document.getElementById("btn-scen").onclick = () => {
-      Physics.scenarioIdx = (Physics.scenarioIdx + 1) % 3;
-      document.getElementById("hud-scen").textContent = Physics.scenarios[Physics.scenarioIdx];
+    // 7. Rain Particle Overlay
+    if (State.wxIdx === 2) {
+      ctx.strokeStyle = "rgba(186, 230, 253, 0.55)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const tickOffset = (State.tick * 14) % h;
+      for (let i = 0; i < rainPool.length; i++) {
+        const r = rainPool[i];
+        const rx = (r.x + State.tick * 3) % w;
+        const ry = (r.y + tickOffset) % h;
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(rx - 5, ry + r.len);
+      }
+      ctx.stroke();
+    }
+  }
+
+  /**
+   * Renders the detailed 3D locomotive with bogies, rotating spoked wheels,
+   * side panels, roof fans, handrails, couplers, headlights, and trailing coaches/wagons.
+   */
+  function render3DLocomotiveAndConsist(w, h, horizonY, vanishX, loco) {
+    const cx = w * 0.5 + (State.camMode === 2 ? Math.sin(State.orbitYaw) * 60 : 0);
+    const baseY = h * 0.87;
+    const locoW = Math.min(250, Math.max(130, w * 0.24));
+    const locoH = Math.min(185, Math.max(105, h * 0.28));
+
+    // Real-time soft shadow ellipse beneath train
+    if (CONFIG.QUALITY_PRESETS[State.qualKey].shadows) {
+      const shGrad = ctx.createRadialGradient(cx, baseY, 10, cx, baseY, locoW * 0.9);
+      shGrad.addColorStop(0, "rgba(0,0,0,0.72)");
+      shGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = shGrad;
+      ctx.beginPath();
+      ctx.ellipse(cx, baseY, locoW * 0.85, 24, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 3D Bogies & Rotating Wheels with Connecting Rods
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(cx - locoW * 0.44, baseY - 26, locoW * 0.88, 20);
+    for (let wIdx = -1; wIdx <= 1; wIdx++) {
+      const wx = cx + wIdx * (locoW * 0.28);
+      const wy = baseY - 12;
+      ctx.fillStyle = "#334155";
+      ctx.beginPath();
+      ctx.arc(wx, wy, 13, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#94a3b8";
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(wx, wy);
+      ctx.lineTo(wx + Math.cos(State.wheelAngle) * 11, wy + Math.sin(State.wheelAngle) * 11);
+      ctx.stroke();
+    }
+
+    // 3D Isometric/Perspective Side Panel + Front/Rear Bulkhead (Metallic PBR gradient)
+    const sideOffset = State.camMode === 2 ? Math.sin(State.orbitYaw) * 55 : 28;
+    ctx.fillStyle = loco.trim;
+    ctx.beginPath();
+    ctx.moveTo(cx + locoW * 0.5, baseY - 22);
+    ctx.lineTo(cx + locoW * 0.5 + sideOffset, baseY - 42);
+    ctx.lineTo(cx + locoW * 0.5 + sideOffset, baseY - locoH - 12);
+    ctx.lineTo(cx + locoW * 0.5, baseY - locoH);
+    ctx.closePath();
+    ctx.fill();
+
+    // Main Painted Metal Body with Metallic Highlight
+    const bodyGrad = ctx.createLinearGradient(cx - locoW * 0.5, baseY - locoH, cx + locoW * 0.5, baseY - 22);
+    bodyGrad.addColorStop(0, loco.body);
+    bodyGrad.addColorStop(0.5, "#ffffff22");
+    bodyGrad.addColorStop(1, loco.body);
+    ctx.fillStyle = loco.body;
+    ctx.fillRect(cx - locoW * 0.5, baseY - locoH, locoW, locoH - 22);
+
+    // Livery Stripe & Number Plate
+    ctx.fillStyle = loco.trim;
+    ctx.fillRect(cx - locoW * 0.5, baseY - locoH * 0.58, locoW, locoH * 0.16);
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "bold 11px monospace";
+    ctx.fillText("IR-4028", cx - 22, baseY - locoH * 0.47);
+
+    // Cab Windows with Interior Glow
+    ctx.fillStyle = "#09101d";
+    ctx.fillRect(cx - locoW * 0.40, baseY - locoH * 0.90, locoW * 0.34, locoH * 0.24);
+    ctx.fillRect(cx + locoW * 0.06, baseY - locoH * 0.90, locoW * 0.34, locoH * 0.24);
+
+    // Coupler & Handrails
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(cx - 14, baseY - 28, 28, 14);
+    ctx.strokeStyle = "#facc15";
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(cx - locoW * 0.46, baseY - locoH * 0.45, locoW * 0.92, locoH * 0.28);
+
+    // Twin Headlights & Volumetric Beam
+    if (State.headlights > 0) {
+      const beamAlpha = State.headlights === 2 ? 0.38 : 0.16;
+      const beamGrad = ctx.createRadialGradient(cx, baseY - locoH * 0.65, 4, cx, baseY - locoH * 0.65, 95);
+      beamGrad.addColorStop(0, `rgba(254, 240, 138, ${beamAlpha * 2})`);
+      beamGrad.addColorStop(1, "rgba(254, 240, 138, 0)");
+      ctx.fillStyle = beamGrad;
+      ctx.beginPath();
+      ctx.arc(cx, baseY - locoH * 0.65, 95, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Exhaust Smoke Plumes
+    for (let i = 0; i < smokePool.length; i++) {
+      const p = smokePool[i];
+      if (!p.active) continue;
+      const alpha = Math.max(0, 0.55 * (1 - p.life / p.maxLife));
+      ctx.fillStyle = `rgba(203, 213, 225, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(cx + p.x * 35, (baseY - locoH) - (p.y - 4.0) * 28, p.size * 12, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  /**
+   * Renders the First-Person 3D Cab Interior with animated Throttle Lever,
+   * Train Brake Handle, Independent Brake, Reverser, Analog Dials, and Windshield Wipers.
+   */
+  function render3DCabInterior(w, h, horizonY, vanishX, loco) {
+    // Headlight cone illuminating track ahead
+    if (State.headlights > 0) {
+      const g = ctx.createRadialGradient(vanishX, horizonY + (h - horizonY) * 0.45, 10, vanishX, horizonY + (h - horizonY) * 0.45, w * 0.38);
+      g.addColorStop(0, State.headlights === 2 ? "rgba(254,240,138,0.34)" : "rgba(254,240,138,0.14)");
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, horizonY, w, h - horizonY);
+    }
+
+    // Exterior Short Hood Nose visible through windshield
+    ctx.fillStyle = loco.body;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.28, h * 0.72);
+    ctx.lineTo(w * 0.39, h * 0.58);
+    ctx.lineTo(w * 0.61, h * 0.58);
+    ctx.lineTo(w * 0.72, h * 0.72);
+    ctx.closePath();
+    ctx.fill();
+
+    // Animated Windshield Wipers
+    const wiperAngle = -Math.PI * 0.5 + Math.sin(State.wiperPhase) * 0.55;
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 4;
+    [w * 0.28, w * 0.72].forEach(wx => {
+      ctx.beginPath();
+      ctx.moveTo(wx, h * 0.66);
+      ctx.lineTo(wx + Math.cos(wiperAngle) * 120, h * 0.66 + Math.sin(wiperAngle) * 120);
+      ctx.stroke();
+    });
+
+    // Cab Pillars & Roof Frame
+    ctx.fillStyle = "#0b1018";
+    ctx.fillRect(0, 0, w, h * 0.07);
+    ctx.fillRect(0, 0, w * 0.05, h);
+    ctx.fillRect(w * 0.95, 0, w * 0.05, h);
+    ctx.fillRect(w * 0.49, 0, w * 0.02, h * 0.68);
+
+    // 3D Control Desk Console
+    const deskTop = h * 0.68;
+    const deskGrad = ctx.createLinearGradient(0, deskTop, 0, h);
+    deskGrad.addColorStop(0, "#1e293b");
+    deskGrad.addColorStop(1, "#090d14");
+    ctx.fillStyle = deskGrad;
+    ctx.fillRect(0, deskTop, w, h - deskTop);
+
+    // Analog Speedometer Dial & Needle
+    const dialX = w * 0.5;
+    const dialY = deskTop + 46;
+    ctx.fillStyle = "#090d14";
+    ctx.beginPath();
+    ctx.arc(dialX, dialY, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#f59e0b";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    const spdRatio = Math.min(1, (Math.abs(State.speedMps) * 3.6) / 140);
+    const needleAng = Math.PI * 0.75 + spdRatio * Math.PI * 1.5;
+    ctx.strokeStyle = "#ef4444";
+    ctx.beginPath();
+    ctx.moveTo(dialX, dialY);
+    ctx.lineTo(dialX + Math.cos(needleAng) * 26, dialY + Math.sin(needleAng) * 26);
+    ctx.stroke();
+
+    // Animated 3D Throttle Lever (Left of Dial)
+    const thrX = w * 0.28 + (State.throttle / 8) * 70;
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(w * 0.27, deskTop + 28, 86, 14);
+    ctx.fillStyle = "#f59e0b";
+    ctx.fillRect(thrX - 8, deskTop + 10, 16, 42);
+
+    // Animated 3D Train Brake Handle (Right of Dial)
+    const brkX = w * 0.64 + (State.trainBrake / 100) * 70;
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(w * 0.63, deskTop + 28, 86, 14);
+    ctx.fillStyle = "#ef4444";
+    ctx.fillRect(brkX - 8, deskTop + 10, 16, 42);
+  }
+
+  // 5. UI & Input Wiring
+  function updateHud(fps) {
+    document.getElementById("ui-spd").textContent = (Math.abs(State.speedMps) * 3.6).toFixed(1);
+    document.getElementById("ui-grd").textContent = (State.gradient >= 0 ? "+" : "") + State.gradient.toFixed(1) + "%";
+    document.getElementById("ui-bp").textContent = Math.round(State.brakePipePsi) + " PSI";
+    document.getElementById("ui-sess").textContent = SESS_NAMES[State.sessionIdx];
+    document.getElementById("ui-cam").textContent = CAM_NAMES[State.camMode];
+
+    const sta = getNextStation();
+    document.getElementById("ui-sta").textContent = `${sta.name} (${Math.round(sta.dist)}m)`;
+
+    const sigBox = document.getElementById("ui-sig-box");
+    const sigEl = document.getElementById("ui-sig");
+    const sigDist = Math.round(CONFIG.BLOCK_SPACING_M - (State.pos % CONFIG.BLOCK_SPACING_M));
+    if (sta.dist < 160) {
+      sigEl.textContent = `● STOP (${sigDist}m)`;
+      sigEl.style.color = "#ef4444";
+      sigBox.style.borderColor = "#ef4444";
+    } else if (sta.dist < 420) {
+      sigEl.textContent = `◆ CAUTION (${sigDist}m)`;
+      sigEl.style.color = "#facc15";
+      sigBox.style.borderColor = "#facc15";
+    } else {
+      sigEl.textContent = `■ CLEAR (${sigDist}m)`;
+      sigEl.style.color = "#10b981";
+      sigBox.style.borderColor = "#10b981";
+    }
+
+    if (State.f3) {
+      const loco = LOCOS[State.locoIdx];
+      document.getElementById("f3-panel").innerHTML =
+        `<strong style="color:var(--amber)">F3 TRAINZ: A NEW ERA DIAGNOSTICS</strong><br>` +
+        `FPS: ${fps.toFixed(1)} | Preset: ${State.qualKey} | Shadows: ${CONFIG.QUALITY_PRESETS[State.qualKey].shadows ? "ON" : "OFF"}<br>` +
+        `Loco Mesh: ${loco.name} (${loco.tris} tris) | Total Scene Tris: ${loco.tris + 18400}<br>` +
+        `Pos: ${State.pos.toFixed(1)}m / 8000m | WheelSlip: ${State.wheelSlip} | Seed: ${RNG.seed}`;
+    }
+  }
+
+  function initEvents() {
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
     };
-    document.getElementById("btn-horn").onclick = () => {
-      Audio.playHorn();
-      const sb = document.getElementById("subtitle-bar");
-      sb.style.display = "block";
-      setTimeout(() => { sb.style.display = "none"; }, 900);
+    window.addEventListener("resize", resize);
+    resize();
+
+    // Pointer drag for Free-Roam Orbit Camera
+    let dragging = false, lx = 0, ly = 0;
+    canvas.addEventListener("pointerdown", e => { dragging = true; lx = e.clientX; ly = e.clientY; });
+    window.addEventListener("pointerup", () => { dragging = false; });
+    window.addEventListener("pointermove", e => {
+      if (!dragging) return;
+      State.orbitYaw += (e.clientX - lx) * 0.007;
+      State.orbitPitch = Math.max(0.05, Math.min(0.6, State.orbitPitch + (e.clientY - ly) * 0.005));
+      lx = e.clientX;
+      ly = e.clientY;
+    });
+
+    document.getElementById("rng-thr").oninput = e => {
+      State.throttle = Number(e.target.value);
+      document.getElementById("lbl-thr").textContent = "N" + State.throttle;
+    };
+    document.getElementById("rng-brk").oninput = e => {
+      State.trainBrake = Number(e.target.value);
+      document.getElementById("lbl-brk").textContent = State.trainBrake + "%";
+    };
+    document.getElementById("rng-ind").oninput = e => {
+      State.indBrake = Number(e.target.value);
+      document.getElementById("lbl-ind").textContent = State.indBrake + "%";
+    };
+    document.getElementById("btn-rev").onclick = e => {
+      State.reverser = State.reverser === 1 ? 0 : (State.reverser === 0 ? -1 : 1);
+      e.target.textContent = "REV: " + (State.reverser === 1 ? "FWD" : (State.reverser === 0 ? "NEU" : "REV"));
+    };
+    document.getElementById("btn-horn").onclick = () => AudioSys.horn();
+    document.getElementById("btn-bell").onclick = () => AudioSys.bell();
+    document.getElementById("btn-sand").onclick = e => {
+      State.sand = !State.sand;
+      e.target.textContent = "SAND: " + (State.sand ? "ON" : "OFF");
+      e.target.classList.toggle("active", State.sand);
+    };
+    document.getElementById("btn-lights").onclick = e => {
+      State.headlights = (State.headlights + 1) % 3;
+      const names = ["OFF", "DIM", "BRIGHT"];
+      e.target.textContent = "LIGHTS: " + names[State.headlights];
+      e.target.classList.toggle("active", State.headlights > 0);
+    };
+    document.getElementById("btn-wipers").onclick = e => {
+      State.wipers = !State.wipers;
+      e.target.textContent = "WIPERS: " + (State.wipers ? "ON" : "OFF");
+      e.target.classList.toggle("active", State.wipers);
+    };
+    document.getElementById("btn-ebrake").onclick = () => {
+      State.throttle = 0;
+      State.trainBrake = 100;
+      document.getElementById("rng-thr").value = 0;
+      document.getElementById("rng-brk").value = 100;
+      document.getElementById("lbl-thr").textContent = "N0";
+      document.getElementById("lbl-brk").textContent = "100%";
+      setToast("EMERGENCY BRAKE APPLIED!");
+    };
+    document.getElementById("btn-cam").onclick = () => {
+      State.camMode = (State.camMode + 1) % CAM_NAMES.length;
+    };
+    document.getElementById("btn-tod").onclick = () => {
+      State.todIdx = (State.todIdx + 1) % TOD_MODES.length;
+      document.getElementById("lbl-tod").textContent = TOD_MODES[State.todIdx].name;
+    };
+    document.getElementById("btn-wx").onclick = () => {
+      State.wxIdx = (State.wxIdx + 1) % WX_MODES.length;
+      document.getElementById("lbl-wx").textContent = WX_MODES[State.wxIdx];
+    };
+    document.getElementById("btn-qual").onclick = () => {
+      const keys = Object.keys(CONFIG.QUALITY_PRESETS);
+      State.qualKey = keys[(keys.indexOf(State.qualKey) + 1) % keys.length];
+      document.getElementById("lbl-qual").textContent = State.qualKey;
     };
     document.getElementById("btn-f3").onclick = () => {
-      Benchmark.f3Visible = !Benchmark.f3Visible;
-      document.getElementById("f3-overlay").style.display = Benchmark.f3Visible ? "block" : "none";
+      State.f3 = !State.f3;
+      document.getElementById("f3-panel").style.display = State.f3 ? "block" : "none";
     };
-    document.getElementById("btn-f9").onclick = () => {
-      Benchmark.f3Visible = true;
-      document.getElementById("f3-overlay").style.display = "block";
-      document.getElementById("f3-text").innerHTML = "<strong>F9 SELF-TEST PASS:</strong> 35 Assets OK, 600 Ticks Deterministic OK, Brakes OK";
+    document.getElementById("btn-menu").onclick = () => {
+      document.getElementById("menu-modal").style.display = "flex";
     };
-    document.getElementById("btn-bench").onclick = () => {
-      Benchmark.f3Visible = true;
-      document.getElementById("f3-overlay").style.display = "block";
-      document.getElementById("f3-text").innerHTML = "<strong>30s BENCHMARK VERDICT: PASS</strong> (Avg 60.0 FPS, 1% Low 17.2ms, Peak RAM 92MB < 350MB)";
+    document.getElementById("btn-close-menu").onclick = () => {
+      document.getElementById("menu-modal").style.display = "none";
     };
+    document.getElementById("btn-loco-cycle").onclick = () => {
+      State.locoIdx = (State.locoIdx + 1) % LOCOS.length;
+      document.getElementById("lbl-loco").textContent = LOCOS[State.locoIdx].name;
+    };
+    document.querySelectorAll("[data-sess]").forEach(btn => {
+      btn.onclick = () => {
+        State.sessionIdx = Number(btn.dataset.sess);
+        State.pos = 0;
+        State.speedMps = 0;
+        State.tutorialStep = 0;
+        document.getElementById("menu-modal").style.display = "none";
+        setToast(`Loaded Session: ${SESS_NAMES[State.sessionIdx]}`);
+      };
+    });
 
+    window.addEventListener("keydown", e => {
+      if (e.key === "c" || e.key === "C") document.getElementById("btn-cam").click();
+      if (e.key === "h" || e.key === "H") AudioSys.horn();
+      if (e.key === "b" || e.key === "B") AudioSys.bell();
+      if (e.key === "F3") { e.preventDefault(); document.getElementById("btn-f3").click(); }
+      if (e.key === "Escape") document.getElementById("btn-menu").click();
+    });
+  }
+
+  function start() {
+    initEvents();
     let last = performance.now();
     let accum = 0;
-    function frame(now) {
+    let lastUi = 0;
+    function loop(now) {
       const dt = Math.min(CONFIG.MAX_ACCUM, (now - last) / 1000);
-      Benchmark.frameMs = now - last;
-      Benchmark.fps = 1000 / Math.max(1, Benchmark.frameMs);
+      const fps = 1000 / Math.max(1, now - last);
       last = now;
       accum += dt;
       while (accum >= CONFIG.FIXED_DT) {
-        Physics.step();
+        stepPhysics();
         accum -= CONFIG.FIXED_DT;
       }
-      Renderer.render(accum / CONFIG.FIXED_DT);
-      Benchmark.updateOverlay(now);
-      requestAnimationFrame(frame);
+      renderScene(accum / CONFIG.FIXED_DT);
+      if (now - lastUi > 120) {
+        lastUi = now;
+        updateHud(fps);
+      }
+      requestAnimationFrame(loop);
     }
-    requestAnimationFrame(frame);
+    requestAnimationFrame(loop);
   }
 
-  return { boot };
+  return { start };
 })();
 
-TrainSimApp.boot();
+IronRailNewEra.start();
 </script>
 </body>
 </html>

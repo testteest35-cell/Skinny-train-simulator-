@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
@@ -54,9 +53,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.sim.BenchmarkReport
 import com.example.sim.HardcodedAssetLibrary
+import com.example.sim.HeadlightState
+import com.example.sim.QualityPreset
 import com.example.sim.ScenarioId
 import com.example.sim.SelfTestReport
 import com.example.sim.SignalAspect
+import com.example.sim.TimeOfDayMode
+import com.example.sim.WeatherMode
 import com.example.ui.theme.AmberGold
 import com.example.ui.theme.CyanTelemetry
 import com.example.ui.theme.RailBorderSteel
@@ -64,7 +67,6 @@ import com.example.ui.theme.RailCardDark
 import com.example.ui.theme.RailSurfaceDark
 import com.example.ui.theme.SignalGreen
 import com.example.ui.theme.SignalRed
-import com.example.ui.theme.SignalYellow
 import kotlin.math.abs
 
 @Composable
@@ -79,6 +81,11 @@ fun TopTelemetryHud(
     scenario: ScenarioId,
     scenarioScore: Int,
     wheelSlip: Boolean,
+    spadPenalty: Boolean,
+    cameraMode: CameraViewMode,
+    timeOfDay: TimeOfDayMode,
+    weather: WeatherMode,
+    qualityPreset: QualityPreset,
     statusMessage: String,
     subtitleCue: String?,
     uiScale: Float,
@@ -86,6 +93,9 @@ fun TopTelemetryHud(
     onToggleF3: () -> Unit,
     onRunF9SelfTest: () -> Unit,
     onCycleCamera: () -> Unit,
+    onCycleTimeOfDay: () -> Unit,
+    onCycleWeather: () -> Unit,
+    onCycleQualityPreset: () -> Unit,
     onOpenSaveModal: () -> Unit,
     onOpenAccessModal: () -> Unit,
     muted: Boolean,
@@ -97,7 +107,6 @@ fun TopTelemetryHud(
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
-        // Primary HUD Bar
         Surface(
             color = RailSurfaceDark.copy(alpha = 0.92f),
             shape = RoundedCornerShape(12.dp),
@@ -111,25 +120,23 @@ fun TopTelemetryHud(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Speed & Gradient
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column {
                             Text(
                                 text = "${"%.1f".format(abs(speedKmH))} KM/H",
                                 style = MaterialTheme.typography.headlineMedium.copy(
                                     fontSize = (20f * uiScale).sp,
-                                    color = if (abs(speedKmH) > scenario.maxSpeedLimitKmH) SignalRed else AmberGold
+                                    color = if (abs(speedKmH) > scenario.maxSpeedLimitKmH || spadPenalty) SignalRed else AmberGold
                                 ),
                                 modifier = Modifier.testTag("hud_speed_text")
                             )
                             Text(
-                                text = "LIMIT ${scenario.maxSpeedLimitKmH.toInt()} | GRD ${"%+.1f".format(gradientPercent)}%",
+                                text = "LIM ${scenario.maxSpeedLimitKmH.toInt()} | GRD ${"%+.1f".format(gradientPercent)}%",
                                 style = MaterialTheme.typography.labelMedium.copy(fontSize = (11f * uiScale).sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        // Colourblind-safe Signal Badge (Circle / Diamond / Square)
+                        Spacer(modifier = Modifier.width(10.dp))
                         SignalAspectBadge(
                             aspect = nextSignal,
                             distanceMeters = distanceToNextSignal,
@@ -137,19 +144,67 @@ fun TopTelemetryHud(
                         )
                     }
 
-                    // Next Stop & Brake Pipe Pressure
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = "NEXT STOP: ${distanceToNextStation.toInt()} m",
+                            text = "STOP: ${distanceToNextStation.toInt()} m",
                             style = MaterialTheme.typography.labelLarge.copy(fontSize = (12f * uiScale).sp),
                             color = CyanTelemetry
                         )
                         Text(
-                            text = "BP: ${brakePipePsi.toInt()} PSI | SCORE: $scenarioScore%",
-                            style = MaterialTheme.typography.labelMedium.copy(fontSize = (11f * uiScale).sp),
+                            text = "BP: ${brakePipePsi.toInt()} PSI | ${cameraMode.label}",
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = (10f * uiScale).sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Environment & Quality Quick Bar (Time of Day, Weather, Quality Preset)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(RailCardDark)
+                            .border(1.dp, RailBorderSteel, RoundedCornerShape(6.dp))
+                            .clickable { onCycleTimeOfDay() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("btn_cycle_tod")
+                    ) {
+                        Text("Time: ${timeOfDay.label}", style = MaterialTheme.typography.labelSmall, color = AmberGold)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(RailCardDark)
+                            .border(1.dp, RailBorderSteel, RoundedCornerShape(6.dp))
+                            .clickable { onCycleWeather() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("btn_cycle_weather")
+                    ) {
+                        Text("Wx: ${weather.label}", style = MaterialTheme.typography.labelSmall, color = CyanTelemetry)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(RailCardDark)
+                            .border(1.dp, RailBorderSteel, RoundedCornerShape(6.dp))
+                            .clickable { onCycleQualityPreset() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("btn_cycle_quality")
+                    ) {
+                        Text("Quality: ${qualityPreset.label}", style = MaterialTheme.typography.labelSmall, color = SignalGreen)
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = "Score: $scenarioScore%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -166,19 +221,19 @@ fun TopTelemetryHud(
                         nextSignal = nextSignal,
                         modifier = Modifier
                             .weight(1f)
-                            .height(26.dp)
+                            .height(24.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                         IconButton(
                             onClick = onCycleCamera,
-                            modifier = Modifier.size(36.dp).testTag("btn_cycle_camera")
+                            modifier = Modifier.size(34.dp).testTag("btn_cycle_camera")
                         ) {
-                            Icon(Icons.Default.Cameraswitch, contentDescription = "Cycle Camera (C)", tint = AmberGold)
+                            Icon(Icons.Default.Cameraswitch, contentDescription = "Cycle 5 Cameras (C)", tint = AmberGold)
                         }
                         IconButton(
                             onClick = onToggleF3,
-                            modifier = Modifier.size(36.dp).testTag("btn_toggle_f3")
+                            modifier = Modifier.size(34.dp).testTag("btn_toggle_f3")
                         ) {
                             Icon(
                                 Icons.Default.Assessment,
@@ -188,25 +243,25 @@ fun TopTelemetryHud(
                         }
                         IconButton(
                             onClick = onRunF9SelfTest,
-                            modifier = Modifier.size(36.dp).testTag("btn_run_f9_selftest")
+                            modifier = Modifier.size(34.dp).testTag("btn_run_f9_selftest")
                         ) {
                             Icon(Icons.Default.BugReport, contentDescription = "Run F9 Self-Test", tint = CyanTelemetry)
                         }
                         IconButton(
                             onClick = onOpenSaveModal,
-                            modifier = Modifier.size(36.dp).testTag("btn_open_saves")
+                            modifier = Modifier.size(34.dp).testTag("btn_open_saves")
                         ) {
                             Icon(Icons.Default.Save, contentDescription = "Save / Load Slots", tint = MaterialTheme.colorScheme.onSurface)
                         }
                         IconButton(
                             onClick = onOpenAccessModal,
-                            modifier = Modifier.size(36.dp).testTag("btn_open_accessibility")
+                            modifier = Modifier.size(34.dp).testTag("btn_open_accessibility")
                         ) {
                             Icon(Icons.Default.SettingsAccessibility, contentDescription = "Accessibility Settings", tint = MaterialTheme.colorScheme.onSurface)
                         }
                         IconButton(
                             onClick = onToggleMute,
-                            modifier = Modifier.size(36.dp).testTag("btn_toggle_mute")
+                            modifier = Modifier.size(34.dp).testTag("btn_toggle_mute")
                         ) {
                             Icon(
                                 if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
@@ -217,7 +272,7 @@ fun TopTelemetryHud(
                     }
                 }
 
-                // Status & Wheel Slip Ticker
+                // Status & SPAD / Wheel Slip Ticker
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -226,21 +281,24 @@ fun TopTelemetryHud(
                     Text(
                         text = statusMessage,
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = (10f * uiScale).sp),
-                        color = if (wheelSlip) SignalRed else AmberGold,
+                        color = if (wheelSlip || spadPenalty) SignalRed else AmberGold,
                         maxLines = 1
                     )
-                    if (wheelSlip) {
+                    if (wheelSlip || spadPenalty) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Warning, contentDescription = "Wheel Slip", tint = SignalRed, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Warning, contentDescription = "Alert", tint = SignalRed, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("WHEEL SLIP!", style = MaterialTheme.typography.labelSmall, color = SignalRed)
+                            Text(
+                                text = if (spadPenalty) "SPAD PENALTY!" else "WHEEL SLIP!",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SignalRed
+                            )
                         }
                     }
                 }
             }
         }
 
-        // Accessibility Subtitle Cue Banner
         if (!subtitleCue.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(4.dp))
             Surface(
@@ -281,7 +339,6 @@ fun SignalAspectBadge(
             val centerPt = Offset(size.width * 0.5f, size.height * 0.5f)
             when (aspect) {
                 SignalAspect.CLEAR_GREEN -> {
-                    // SQUARE
                     drawRect(
                         color = c,
                         topLeft = Offset(centerPt.x - r, centerPt.y - r),
@@ -289,7 +346,6 @@ fun SignalAspectBadge(
                     )
                 }
                 SignalAspect.APPROACH_YELLOW -> {
-                    // DIAMOND
                     val path = Path().apply {
                         moveTo(centerPt.x, centerPt.y - r * 1.2f)
                         lineTo(centerPt.x + r * 1.2f, centerPt.y)
@@ -300,7 +356,6 @@ fun SignalAspectBadge(
                     drawPath(path, color = c)
                 }
                 SignalAspect.STOP_RED -> {
-                    // CIRCLE
                     drawCircle(color = c, radius = r, center = centerPt)
                 }
             }
@@ -339,10 +394,9 @@ fun MiniRouteStripMap(
     ) {
         val w = size.width
         val h = size.height
-        val maxRouteMeters = 4200f
+        val maxRouteMeters = 4800f
         val cy = h * 0.5f
 
-        // Track line
         drawLine(
             color = Color(0xFF334155),
             start = Offset(10f, cy),
@@ -350,7 +404,6 @@ fun MiniRouteStripMap(
             strokeWidth = 3f
         )
 
-        // Station ticks
         val stations = scenario.stations
         for (i in stations.indices) {
             val st = stations[i]
@@ -362,14 +415,12 @@ fun MiniRouteStripMap(
             )
         }
 
-        // Current Train Marker
         val trainX = 10f + (((positionMeters.toFloat() % maxRouteMeters) / maxRouteMeters).coerceIn(0f, 1f)) * (w - 20f)
         drawRoundRect(
             color = AmberGold,
             topLeft = Offset(trainX - 6f, cy - 5f),
             size = Size(12f, 10f)
         )
-        // Next signal dot ahead
         val sigX = (trainX + 24f).coerceAtMost(w - 12f)
         drawCircle(
             color = Color(nextSignal.colorHex),
@@ -413,7 +464,7 @@ fun F3DiagnosticsOverlay(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "F3 DIAGNOSTICS & TELEMETRY (4 Hz Refresh)",
+                    text = "F3 TRAINZ: A NEW ERA DIAGNOSTICS",
                     style = MaterialTheme.typography.labelLarge,
                     color = AmberGold
                 )
@@ -431,22 +482,22 @@ fun F3DiagnosticsOverlay(
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "FPS: ${"%.1f".format(fps)} (Locked 60) | Frame: ${"%.2f".format(avgFrameMs)} ms | 1% Low: ${"%.2f".format(onePercentLowMs)} ms (<20ms)",
+                text = "FPS: ${"%.1f".format(fps)} (60Hz Target) | Frame: ${"%.2f".format(avgFrameMs)} ms | 1% Low: ${"%.2f".format(onePercentLowMs)} ms",
                 style = MaterialTheme.typography.labelMedium,
                 color = SignalGreen
             )
             Text(
-                text = "Draw Calls: $drawCalls / 80 | Triangles: $triangles / 100k | Frustum Culled: $culledObjects objs",
+                text = "Draw Calls: $drawCalls / 80 | 3D Mesh Triangles: $triangles | Frustum Culled: $culledObjects objs",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "JS/VM Heap: ${"%.1f".format(heapMb)} MB / 350 MB | Active Pooled Particles: $activeParticles / 64",
+                text = "Memory: ${"%.1f".format(heapMb)} MB | Active Pooled Particles: $activeParticles / 64",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "Deterministic Tick: $tickCount (60Hz) | PRNG Seed: $seed | $qualityTierLabel",
+                text = "Tick: $tickCount (60Hz) | PRNG Seed: $seed | $qualityTierLabel",
                 style = MaterialTheme.typography.labelSmall,
                 color = CyanTelemetry
             )
@@ -454,7 +505,7 @@ fun F3DiagnosticsOverlay(
             if (benchmarkReport != null) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "BENCHMARK VERDICT: ${if (benchmarkReport.passedAllCriteria) "PASS (ALL 8 CRITERIA MET)" else "FAIL"} — ${benchmarkReport.verdictSummary}",
+                    text = "BENCHMARK VERDICT: ${if (benchmarkReport.passedAllCriteria) "PASS" else "FAIL"} — ${benchmarkReport.verdictSummary}",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (benchmarkReport.passedAllCriteria) SignalGreen else SignalRed
                 )
@@ -463,7 +514,7 @@ fun F3DiagnosticsOverlay(
             if (selfTestReport != null) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "F9 SELF-TEST: ${if (selfTestReport.overallPass) "PASS" else "FAIL"} (Peak ${"%.1f".format(selfTestReport.peakSpeedReachedKmH)} km/h -> 0.0 km/h stop, ${selfTestReport.assetsVerifiedCount} assets OK)",
+                    text = "F9 SELF-TEST: ${if (selfTestReport.overallPass) "PASS" else "FAIL"} (Peak ${"%.1f".format(selfTestReport.peakSpeedReachedKmH)} km/h -> 0.0 km/h stop, ${selfTestReport.assetsVerifiedCount} 3D assets OK)",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (selfTestReport.overallPass) SignalGreen else SignalRed
                 )
@@ -486,6 +537,12 @@ fun BottomCabControlsDeck(
     onIndBrakeChange: (Float) -> Unit,
     dynamicBrakeNotch: Int,
     onDynamicBrakeChange: (Int) -> Unit,
+    sandActive: Boolean,
+    onToggleSand: () -> Unit,
+    headlightState: HeadlightState,
+    onCycleHeadlights: () -> Unit,
+    wipersActive: Boolean,
+    onToggleWipers: () -> Unit,
     couplerSlackEnabled: Boolean,
     onToggleCouplerSlack: (Boolean) -> Unit,
     onSoundHorn: () -> Unit,
@@ -495,7 +552,6 @@ fun BottomCabControlsDeck(
     onSelectScenario: (ScenarioId) -> Unit,
     selectedLocoIndex: Int,
     onSelectLoco: (Int) -> Unit,
-    // Surveyor controls
     selectedSurveyorAssetId: String,
     isPlacingTrackSpline: Boolean,
     onSelectSurveyorModeType: (Boolean) -> Unit,
@@ -514,37 +570,36 @@ fun BottomCabControlsDeck(
             .border(1.dp, RailBorderSteel, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
-            // Mode Switcher + Scenario Pills
+            // Mode Switcher + 4 Sessions (Free Drive, Passenger, Freight, Tutorial)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     FilterChip(
                         selected = !isSurveyorMode,
                         onClick = { onToggleSurveyorMode(false) },
-                        label = { Text("Driver Mode", style = MaterialTheme.typography.labelMedium) },
+                        label = { Text("Drive", style = MaterialTheme.typography.labelSmall) },
                         modifier = Modifier.testTag("chip_driver_mode")
                     )
                     FilterChip(
                         selected = isSurveyorMode,
                         onClick = { onToggleSurveyorMode(true) },
-                        label = { Text("Surveyor (5° Grid)", style = MaterialTheme.typography.labelMedium) },
+                        label = { Text("Surveyor", style = MaterialTheme.typography.labelSmall) },
                         modifier = Modifier.testTag("chip_surveyor_mode")
                     )
                 }
 
-                // Scenario selector chips
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    ScenarioId.entries.forEach { scen ->
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    itemsIndexed(ScenarioId.entries) { _, scen ->
                         val active = scen == selectedScenario
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(if (active) AmberGold else RailCardDark)
                                 .clickable { onSelectScenario(scen) }
-                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                                .padding(horizontal = 7.dp, vertical = 5.dp)
                                 .testTag("scenario_${scen.name.lowercase()}")
                         ) {
                             Text(
@@ -560,7 +615,6 @@ fun BottomCabControlsDeck(
             Spacer(modifier = Modifier.height(6.dp))
 
             if (isSurveyorMode) {
-                // SURVEYOR PALETTE & 20-STEP POOLED UNDO/REDO
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -570,26 +624,26 @@ fun BottomCabControlsDeck(
                         FilterChip(
                             selected = isPlacingTrackSpline,
                             onClick = { onSelectSurveyorModeType(true) },
-                            label = { Text("Track Spline Node") }
+                            label = { Text("Track Spline") }
                         )
                         FilterChip(
                             selected = !isPlacingTrackSpline,
                             onClick = { onSelectSurveyorModeType(false) },
-                            label = { Text("Scenery (20 Items)") }
+                            label = { Text("Scenery (20)") }
                         )
                         Button(
                             onClick = onRotateSurveyorSnap,
                             colors = ButtonDefaults.buttonColors(containerColor = RailCardDark)
                         ) {
-                            Text("Snap: ${surveyorSnapAngleDeg}° (+5°)", style = MaterialTheme.typography.labelSmall)
+                            Text("Snap: ${surveyorSnapAngleDeg}°", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                     Row {
                         IconButton(onClick = onSurveyorUndo, modifier = Modifier.testTag("btn_surveyor_undo")) {
-                            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo (Pooled 20-step)", tint = AmberGold)
+                            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo", tint = AmberGold)
                         }
                         IconButton(onClick = onSurveyorRedo, modifier = Modifier.testTag("btn_surveyor_redo")) {
-                            Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo (Pooled 20-step)", tint = CyanTelemetry)
+                            Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", tint = CyanTelemetry)
                         }
                     }
                 }
@@ -619,20 +673,18 @@ fun BottomCabControlsDeck(
                     }
                 } else {
                     Text(
-                        text = "Tap anywhere on the blueprint grid above to lay track spline nodes with 5° angle snapping.",
+                        text = "Tap the Surveyor grid to lay 3D track splines with 5° snap & 20-step Undo/Redo.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             } else {
-                // DRIVER MODE COCKPIT CONTROLS
-                // Row 1: Throttle Notches (0..8) & Reverser (REV / NEU / FWD)
+                // Row 1: Notched Throttle (0..8) & Reverser (REV / NEU / FWD)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Throttle Notch Bar
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "THROTTLE NOTCH: N$throttleNotch | DYN BRAKE: B$dynamicBrakeNotch",
@@ -648,7 +700,7 @@ fun BottomCabControlsDeck(
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .size(width = 26.dp, height = 28.dp)
+                                        .size(width = 25.dp, height = 26.dp)
                                         .clip(RoundedCornerShape(4.dp))
                                         .background(if (active) AmberGold else RailCardDark)
                                         .clickable { onThrottleChange(n) }
@@ -664,11 +716,10 @@ fun BottomCabControlsDeck(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
 
-                    // Reverser Lever (-1, 0, 1)
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("REVERSER (A/D)", style = MaterialTheme.typography.labelSmall, color = CyanTelemetry)
+                        Text("REVERSER (F/N/R)", style = MaterialTheme.typography.labelSmall, color = CyanTelemetry)
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.padding(top = 3.dp)
@@ -678,11 +729,11 @@ fun BottomCabControlsDeck(
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .height(28.dp)
+                                        .height(26.dp)
                                         .clip(RoundedCornerShape(4.dp))
                                         .background(if (active) CyanTelemetry else RailCardDark)
                                         .clickable { onReverserChange(dir) }
-                                        .padding(horizontal = 8.dp)
+                                        .padding(horizontal = 7.dp)
                                         .testTag("reverser_$lbl")
                                 ) {
                                     Text(
@@ -696,9 +747,9 @@ fun BottomCabControlsDeck(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(5.dp))
 
-                // Row 2: Automatic & Independent Brake Sliders + Horn / Bell / E-Brake
+                // Row 2: Train Brake & Independent Brake Sliders + Horn / Bell / E-Stop
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -706,7 +757,7 @@ fun BottomCabControlsDeck(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "AUTO BRAKE: ${autoBrakePercent.toInt()}% | IND: ${indBrakePercent.toInt()}%",
+                            text = "TRAIN BRAKE: ${autoBrakePercent.toInt()}% | IND BRAKE: ${indBrakePercent.toInt()}%",
                             style = MaterialTheme.typography.labelSmall
                         )
                         Slider(
@@ -716,45 +767,93 @@ fun BottomCabControlsDeck(
                                 onIndBrakeChange(it * 0.75f)
                             },
                             valueRange = 0f..100f,
-                            modifier = Modifier.height(26.dp).testTag("slider_auto_brake")
+                            modifier = Modifier.height(24.dp).testTag("slider_auto_brake")
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Button(
                             onClick = onSoundHorn,
                             colors = ButtonDefaults.buttonColors(containerColor = AmberGold, contentColor = Color.Black),
-                            modifier = Modifier.height(36.dp).testTag("btn_horn")
+                            modifier = Modifier.height(32.dp).testTag("btn_horn")
                         ) {
-                            Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text("HORN", style = MaterialTheme.typography.labelSmall)
                         }
                         Button(
                             onClick = onRingBell,
                             colors = ButtonDefaults.buttonColors(containerColor = RailCardDark),
-                            modifier = Modifier.height(36.dp).testTag("btn_bell")
+                            modifier = Modifier.height(32.dp).testTag("btn_bell")
                         ) {
                             Text("BELL", style = MaterialTheme.typography.labelSmall)
                         }
                         Button(
                             onClick = onEmergencyBrake,
                             colors = ButtonDefaults.buttonColors(containerColor = SignalRed, contentColor = Color.White),
-                            modifier = Modifier.height(36.dp).testTag("btn_emergency_brake")
+                            modifier = Modifier.height(32.dp).testTag("btn_emergency_brake")
                         ) {
                             Text("STOP", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
 
-                // Row 3: Locomotive Roster Selector & Coupler Slack Toggle
+                // Row 3: Trainz Cab Auxiliary Switches (Sand, Headlights, Wipers) + Locomotive Roster
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (sandActive) AmberGold else RailCardDark)
+                            .border(1.dp, RailBorderSteel, RoundedCornerShape(6.dp))
+                            .clickable { onToggleSand() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("btn_toggle_sand")
+                    ) {
+                        Text(
+                            text = "SAND: ${if (sandActive) "ON" else "OFF"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (sandActive) Color.Black else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (headlightState != HeadlightState.OFF) CyanTelemetry else RailCardDark)
+                            .border(1.dp, RailBorderSteel, RoundedCornerShape(6.dp))
+                            .clickable { onCycleHeadlights() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("btn_cycle_headlights")
+                    ) {
+                        Text(
+                            text = "LIGHTS: ${headlightState.label}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (headlightState != HeadlightState.OFF) Color.Black else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (wipersActive) SignalGreen else RailCardDark)
+                            .border(1.dp, RailBorderSteel, RoundedCornerShape(6.dp))
+                            .clickable { onToggleWipers() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("btn_toggle_wipers")
+                    ) {
+                        Text(
+                            text = "WIPERS: ${if (wipersActive) "ON" else "OFF"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (wipersActive) Color.Black else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier.weight(1f)
@@ -769,22 +868,12 @@ fun BottomCabControlsDeck(
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    text = loco.name,
+                                    text = "${loco.name} (${loco.triangleCount}t)",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (selected) Color.Black else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("O(1) Slack", style = MaterialTheme.typography.labelSmall)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Switch(
-                            checked = couplerSlackEnabled,
-                            onCheckedChange = onToggleCouplerSlack,
-                            modifier = Modifier.testTag("switch_coupler_slack")
-                        )
                     }
                 }
             }

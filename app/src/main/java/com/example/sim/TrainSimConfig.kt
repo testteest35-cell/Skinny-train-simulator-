@@ -3,27 +3,29 @@ package com.example.sim
 import androidx.compose.ui.graphics.Color
 
 /**
- * Frozen simulation configuration constants (`CONFIG`) so tuning never requires hunting through code.
+ * Frozen simulation configuration constants (`CONFIG`) for Trainz: A New Era 3D Simulator.
  */
 object TrainSimConfig {
     const val FIXED_DT: Double = 1.0 / 60.0
-    const val MAX_ACCUMULATOR: Double = 0.25 // Caps accumulator to prevent spiral of death
+    const val MAX_ACCUMULATOR: Double = 0.25
     const val GRAVITY: Double = 9.80665
     const val MAX_THROTTLE_NOTCH: Int = 8
     const val BRAKE_PIPE_MAX_PSI: Float = 90.0f
     const val BRAKE_PIPE_MIN_PSI: Float = 64.0f
     const val EMERGENCY_BRAKE_PSI: Float = 0.0f
 
-    // Adhesion & resistance constants (Davis equation: A + B*v + C*v^2)
+    // Davis equation & adhesion constants
     const val DAVIS_A_LOCO: Double = 6.5
     const val DAVIS_A_CAR: Double = 1.8
     const val DAVIS_B: Double = 0.045
     const val DAVIS_C: Double = 0.0012
     const val DRY_ADHESION_COEFF: Double = 0.33
+    const val WET_ADHESION_COEFF: Double = 0.21
+    const val SAND_ADHESION_MULTIPLIER: Double = 1.35
     const val SLIP_PENALTY_FACTOR: Double = 0.42
     const val COUPLER_SLACK_MAX_M: Double = 0.18
 
-    // Rendering & Memory budgets (4 GB RAM / 60 FPS Mandate)
+    // Rendering & Memory budgets
     const val MAX_DRAW_CALLS_BUDGET: Int = 80
     const val MAX_TRIANGLES_BUDGET: Int = 100_000
     const val MAX_RAM_MB_BUDGET: Int = 350
@@ -41,25 +43,66 @@ object TrainSimConfig {
     const val SAVE_SCHEMA_VERSION: Int = 1
 }
 
+enum class TimeOfDayMode(
+    val label: String,
+    val skyTopHex: Long,
+    val skyHorizonHex: Long,
+    val groundHex: Long,
+    val nightGlowIntensity: Float
+) {
+    DAWN("Dawn", 0xFF1E1B4B, 0xFFF97316, 0xFF1F2937, 0.35f),
+    DAY("Day", 0xFF0284C7, 0xFFBAE6FD, 0xFF1E3A29, 0.0f),
+    DUSK("Dusk", 0xFF0B1325, 0xFFD97706, 0xFF1A2521, 0.65f),
+    NIGHT("Night", 0xFF030712, 0xFF0F172A, 0xFF090D14, 1.0f)
+}
+
+enum class WeatherMode(val label: String) {
+    CLEAR("Clear"),
+    OVERCAST("Overcast"),
+    LIGHT_RAIN("Light Rain"),
+    FOG("Heavy Fog")
+}
+
+enum class HeadlightState(val label: String) {
+    OFF("OFF"),
+    DIM("DIM"),
+    BRIGHT("BRIGHT")
+}
+
+enum class QualityPreset(
+    val label: String,
+    val drawDistanceScale: Float,
+    val shadowsEnabled: Boolean,
+    val bloomEnabled: Boolean
+) {
+    LOW("Low", 0.65f, false, false),
+    MEDIUM("Medium", 0.85f, true, false),
+    HIGH("High", 1.0f, true, true),
+    ULTRA("Ultra", 1.25f, true, true)
+}
+
 enum class SignalAspect(
     val label: String,
     val shapeName: String,
     val speedLimitMps: Double,
-    val colorHex: Long
+    val colorHex: Long,
+    val semaphoreAngleDeg: Float
 ) {
-    CLEAR_GREEN("CLEAR", "SQUARE", 45.0, 0xFF10B981),
-    APPROACH_YELLOW("APPROACH", "DIAMOND", 20.0, 0xFFFACC15),
-    STOP_RED("STOP", "CIRCLE", 0.0, 0xFFEF4444)
+    CLEAR_GREEN("CLEAR", "SQUARE", 45.0, 0xFF10B981, -45f),
+    APPROACH_YELLOW("CAUTION", "DIAMOND", 20.0, 0xFFFACC15, -22f),
+    STOP_RED("STOP", "CIRCLE", 0.0, 0xFFEF4444, 0f)
 }
 
 data class LocomotiveSpec(
     val id: String,
     val name: String,
+    val tractionType: String, // "Diesel-Electric", "Electric", "Steam"
+    val roadNumber: String,
     val massTons: Double,
     val maxTractiveEffortKn: Double,
     val maxPowerKw: Double,
     val maxSpeedKmH: Double,
-    val triangleCount: Int,
+    val triangleCount: Int, // 2,000 - 4,000+ high-detail locomotive meshes
     val primaryColor: Color,
     val accentColor: Color
 )
@@ -101,36 +144,38 @@ enum class ScenarioId(
     val stations: List<StationStop>
 ) {
     FREE_ROAM(
-        title = "Free Roam",
-        subtitle = "Pure sandbox across the 6 km Alpine Loop. No speed or schedule penalties.",
+        title = "Free Drive",
+        subtitle = "Pick any locomotive & consist across the 8 km Alpine & Valley route.",
         defaultLocoIndex = 0,
         freightCarCount = 5,
-        steepGradeFactor = 0.6,
+        steepGradeFactor = 0.7,
         maxSpeedLimitKmH = 120.0,
         stations = listOf(
-            StationStop("Timberline Yard", 600.0, 60),
-            StationStop("Oakridge Junction", 1800.0, 140),
-            StationStop("Summit Pass", 3200.0, 240)
+            StationStop("Timberline Depot", 600.0, 60),
+            StationStop("Oakridge Town", 1650.0, 140),
+            StationStop("Riverbend Viaduct", 2800.0, 220),
+            StationStop("Grand Summit Terminal", 4200.0, 320)
         )
     ),
     PASSENGER_RUN(
-        title = "Passenger Run",
-        subtitle = "5 timed station stops with ±10s tolerance scoring. Smooth braking required.",
+        title = "Passenger Service",
+        subtitle = "6 timed station stops with punctuality & stopping accuracy scoring.",
         defaultLocoIndex = 3,
         freightCarCount = 6,
-        steepGradeFactor = 0.8,
+        steepGradeFactor = 0.85,
         maxSpeedLimitKmH = 140.0,
         stations = listOf(
             StationStop("Central Terminal", 550.0, 45),
             StationStop("Riverside Halt", 1300.0, 95),
             StationStop("Beacon Valley", 2150.0, 150),
             StationStop("Northridge Parkway", 3050.0, 210),
-            StationStop("Grand Summit Depot", 4000.0, 275)
+            StationStop("Emerald Lake Station", 3900.0, 265),
+            StationStop("Grand Summit Depot", 4800.0, 325)
         )
     ),
     FREIGHT_HAUL(
-        title = "Freight Haul",
-        subtitle = "1,480-ton consist over a 2.4% ruling grade. Do not stall or exceed 65 km/h.",
+        title = "Freight Run",
+        subtitle = "1,480-ton consist over a 2.2% ruling grade. Manage wheel slip, sand, and brake fade.",
         defaultLocoIndex = 1,
         freightCarCount = 12,
         steepGradeFactor = 2.2,
@@ -140,54 +185,66 @@ enum class ScenarioId(
             StationStop("Iron Gorge Crest", 2400.0, 220),
             StationStop("Steelworks Exchange", 3900.0, 340)
         )
+    ),
+    TUTORIAL(
+        title = "Tutorial",
+        subtitle = "Step-by-step interactive cab coaching: Reverser, Brakes, Horn, Throttle, and Station Stop.",
+        defaultLocoIndex = 0,
+        freightCarCount = 4,
+        steepGradeFactor = 0.3,
+        maxSpeedLimitKmH = 80.0,
+        stations = listOf(
+            StationStop("Timberline Training Platform", 480.0, 75),
+            StationStop("Oakridge Valley Depot", 1400.0, 160)
+        )
     )
 }
 
 object HardcodedAssetLibrary {
-    // 5 Locomotives (all <= 800 triangles)
+    // 5 Detailed Locomotives (2,950 - 4,120 triangles per locomotive)
     val locomotives: List<LocomotiveSpec> = listOf(
-        LocomotiveSpec("loco_sd40", "EMD SD40-2 Road Switcher", 167.0, 365.0, 2240.0, 105.0, 740, Color(0xFFF59E0B), Color(0xFF1E293B)),
-        LocomotiveSpec("loco_es44", "GE ES44AC Heavy Haul", 195.0, 530.0, 3280.0, 112.0, 780, Color(0xFFEA580C), Color(0xFF0F172A)),
-        LocomotiveSpec("loco_class66", "EMD Class 66 Euro Freight", 129.0, 409.0, 2460.0, 120.0, 710, Color(0xFF10B981), Color(0xFFFACC15)),
-        LocomotiveSpec("loco_vectron", "Alpine Express Electric", 85.0, 320.0, 6400.0, 160.0, 680, Color(0xFF38BDF8), Color(0xFFF8FAFC)),
-        LocomotiveSpec("loco_mikado", "2-8-2 Heritage Steam", 142.0, 285.0, 1950.0, 90.0, 790, Color(0xFF334155), Color(0xFFEF4444))
+        LocomotiveSpec("loco_sd40", "EMD SD40-2 Road Switcher", "Diesel-Electric", "IR-4028", 167.0, 365.0, 2240.0, 105.0, 3420, Color(0xFFF59E0B), Color(0xFF1E293B)),
+        LocomotiveSpec("loco_es44", "GE ES44AC Heavy Haul", "Diesel-Electric", "IR-8814", 195.0, 530.0, 3280.0, 112.0, 3860, Color(0xFFEA580C), Color(0xFF0F172A)),
+        LocomotiveSpec("loco_class66", "EMD Class 66 Euro Freight", "Diesel-Electric", "IR-6609", 129.0, 409.0, 2460.0, 120.0, 3180, Color(0xFF10B981), Color(0xFFFACC15)),
+        LocomotiveSpec("loco_vectron", "Alpine Vectron Electric", "Electric", "IR-193", 85.0, 320.0, 6400.0, 160.0, 2950, Color(0xFF38BDF8), Color(0xFFF8FAFC)),
+        LocomotiveSpec("loco_mikado", "2-8-2 Mikado Heritage Steam", "Steam", "IR-282", 142.0, 285.0, 1950.0, 90.0, 4120, Color(0xFF334155), Color(0xFFEF4444))
     )
 
-    // 10 Freight / Rolling Stock Cars (all <= 400 triangles)
+    // 10 Detailed Rolling Stock Cars (Passenger Coaches + Freight Wagons)
     val freightCars: List<FreightCarSpec> = listOf(
-        FreightCarSpec("car_box", "50ft Hi-Cube Boxcar", 28.0, 92.0, 16.5f, 280, Color(0xFF9A3412)),
-        FreightCarSpec("car_hopper", "100-Ton Coal Hopper", 26.0, 118.0, 15.8f, 320, Color(0xFF1E293B)),
-        FreightCarSpec("car_tank", "DOT-117 Hazmat Tank Car", 31.0, 108.0, 17.2f, 360, Color(0xFF334155)),
-        FreightCarSpec("car_flat", "60ft Bulkhead Flatcar", 24.0, 84.0, 19.0f, 220, Color(0xFF78350F)),
-        FreightCarSpec("car_intermodal", "Double-Stack Well Car", 29.0, 96.0, 20.5f, 340, Color(0xFF0284C7)),
-        FreightCarSpec("car_gondola", "Mill Gondola Scrap Car", 27.0, 104.0, 16.0f, 260, Color(0xFF475569)),
-        FreightCarSpec("car_autorack", "Tri-Level Autorack", 41.0, 86.0, 27.0f, 310, Color(0xFFD97706)),
-        FreightCarSpec("car_reefer", "Cryogenic Reefer Car", 34.0, 94.0, 18.2f, 290, Color(0xFFE2E8F0)),
-        FreightCarSpec("car_coach", "Bi-Level Commuter Coach", 48.0, 62.0, 25.0f, 380, Color(0xFF0EA5E9)),
-        FreightCarSpec("car_caboose", "Wide-Vision Steel Caboose", 24.0, 26.0, 11.5f, 350, Color(0xFFDC2626))
+        FreightCarSpec("car_coach", "Bi-Level Panorama Coach", 48.0, 62.0, 25.0f, 680, Color(0xFF0EA5E9)),
+        FreightCarSpec("car_box", "50ft Hi-Cube Boxcar", 28.0, 92.0, 16.5f, 520, Color(0xFF9A3412)),
+        FreightCarSpec("car_flat", "60ft Timber Bulkhead Flatbed", 24.0, 84.0, 19.0f, 460, Color(0xFF78350F)),
+        FreightCarSpec("car_tank", "DOT-117 Pressurized Tanker", 31.0, 108.0, 17.2f, 640, Color(0xFF334155)),
+        FreightCarSpec("car_hopper", "100-Ton Ribbed Coal Hopper", 26.0, 118.0, 15.8f, 580, Color(0xFF1E293B)),
+        FreightCarSpec("car_intermodal", "Double-Stack Container Well", 29.0, 96.0, 20.5f, 610, Color(0xFF0284C7)),
+        FreightCarSpec("car_gondola", "Heavy Mill Steel Gondola", 27.0, 104.0, 16.0f, 490, Color(0xFF475569)),
+        FreightCarSpec("car_autorack", "Tri-Level Enclosed Autorack", 41.0, 86.0, 27.0f, 540, Color(0xFFD97706)),
+        FreightCarSpec("car_reefer", "Cryogenic Mechanical Reefer", 34.0, 94.0, 18.2f, 510, Color(0xFFE2E8F0)),
+        FreightCarSpec("car_caboose", "Wide-Vision Cupola Caboose", 24.0, 26.0, 11.5f, 620, Color(0xFFDC2626))
     )
 
-    // 20 Scenery Items (all <= 150 triangles)
+    // 20 Route & Scenery Items
     val sceneryItems: List<ScenerySpec> = listOf(
-        ScenerySpec("scn_pine", "Alpine Pine Tree", "Flora", 48, 16, Color(0xFF15803D), 14f),
-        ScenerySpec("scn_spruce", "Blue Spruce Cluster", "Flora", 64, 20, Color(0xFF166534), 16f),
-        ScenerySpec("scn_oak", "Deciduous Oak", "Flora", 72, 24, Color(0xFF4D7C0F), 12f),
-        ScenerySpec("scn_boulder", "Granite Outcrop", "Geology", 44, 14, Color(0xFF64748B), 5f),
-        ScenerySpec("scn_cliff", "Slate Cliff Slab", "Geology", 80, 28, Color(0xFF475569), 22f),
-        ScenerySpec("scn_depot", "Timber Passenger Depot", "Structures", 136, 42, Color(0xFFB45309), 9f),
-        ScenerySpec("scn_tower", "Interlocking Signal Tower", "Structures", 118, 36, Color(0xFF9A3412), 13f),
-        ScenerySpec("scn_silo", "Twin Concrete Grain Silo", "Industry", 142, 48, Color(0xFFCBD5E1), 24f),
-        ScenerySpec("scn_water", "Trackside Water Tank", "Structures", 110, 32, Color(0xFF78350F), 11f),
-        ScenerySpec("scn_coaltipple", "Mine Coal Tipple", "Industry", 148, 52, Color(0xFF334155), 20f),
-        ScenerySpec("scn_catenary", "Steel Catenary Mast", "Trackside", 36, 12, Color(0xFF94A3B8), 8.5f),
-        ScenerySpec("scn_signal_gantry", "Cantilever Signal Bridge", "Trackside", 92, 28, Color(0xFF64748B), 9.5f),
-        ScenerySpec("scn_crossing", "Grade Crossing Gate", "Trackside", 56, 18, Color(0xFFEF4444), 4.5f),
-        ScenerySpec("scn_milepost", "Concrete Milepost Marker", "Trackside", 24, 8, Color(0xFFF8FAFC), 1.8f),
-        ScenerySpec("scn_relaybox", "Wayside Relay Cabinet", "Trackside", 28, 12, Color(0xFF94A3B8), 2.4f),
-        ScenerySpec("scn_warehouse", "Corrugated Freight Shed", "Industry", 96, 32, Color(0xFF475569), 10f),
-        ScenerySpec("scn_substation", "Traction Transformer Yard", "Industry", 128, 40, Color(0xFF0284C7), 7.5f),
-        ScenerySpec("scn_bridge_truss", "Warren Steel Bridge Span", "Structures", 144, 48, Color(0xFF334155), 12f),
-        ScenerySpec("scn_fence", "Wooden Snow Fence", "Trackside", 32, 10, Color(0xFFA16207), 2.2f),
-        ScenerySpec("scn_lamp", "Yard Floodlight Tower", "Trackside", 52, 16, Color(0xFFFACC15), 15f)
+        ScenerySpec("scn_pine", "Alpine Pine Tree", "Flora", 120, 32, Color(0xFF15803D), 14f),
+        ScenerySpec("scn_spruce", "Blue Spruce Cluster", "Flora", 140, 36, Color(0xFF166534), 16f),
+        ScenerySpec("scn_oak", "Broadleaf Valley Oak", "Flora", 148, 40, Color(0xFF4D7C0F), 12f),
+        ScenerySpec("scn_boulder", "Granite Cliff Outcrop", "Geology", 96, 28, Color(0xFF64748B), 5f),
+        ScenerySpec("scn_cliff", "Layered Slate Ridge", "Geology", 136, 42, Color(0xFF475569), 22f),
+        ScenerySpec("scn_depot", "Brick Station Building & Canopy", "Stations", 340, 96, Color(0xFFB45309), 9f),
+        ScenerySpec("scn_footbridge", "Station Steel Footbridge", "Stations", 280, 84, Color(0xFF475569), 8.5f),
+        ScenerySpec("scn_tower", "Interlocking Signal Box", "Structures", 220, 64, Color(0xFF9A3412), 13f),
+        ScenerySpec("scn_silo", "Twin Concrete Grain Elevator", "Industry", 310, 88, Color(0xFFCBD5E1), 24f),
+        ScenerySpec("scn_coaltipple", "Valley Coal Loader Tipple", "Industry", 350, 98, Color(0xFF334155), 20f),
+        ScenerySpec("scn_catenary", "Overhead Catenary Portal", "Trackside", 110, 32, Color(0xFF94A3B8), 8.5f),
+        ScenerySpec("scn_signal_gantry", "Semaphore & Light Signal Mast", "Trackside", 160, 48, Color(0xFF64748B), 9.5f),
+        ScenerySpec("scn_crossing", "Automated Level Crossing Gate", "Trackside", 124, 36, Color(0xFFEF4444), 4.5f),
+        ScenerySpec("scn_townhouse", "Half-Timbered Town House", "Town", 240, 72, Color(0xFFD97706), 11f),
+        ScenerySpec("scn_church", "Village Stone Spire", "Town", 290, 82, Color(0xFF94A3B8), 19f),
+        ScenerySpec("scn_warehouse", "Freight Distribution Shed", "Industry", 190, 56, Color(0xFF475569), 10f),
+        ScenerySpec("scn_substation", "Traction Feeder Substation", "Industry", 230, 68, Color(0xFF0284C7), 7.5f),
+        ScenerySpec("scn_bridge_truss", "Warren Steel Viaduct Span", "Structures", 320, 92, Color(0xFF334155), 12f),
+        ScenerySpec("scn_fence", "Lineside Timber Fence", "Trackside", 64, 20, Color(0xFFA16207), 2.2f),
+        ScenerySpec("scn_lamp", "Platform Heritage Lamp Post", "Stations", 88, 24, Color(0xFFFACC15), 6.5f)
     )
 }

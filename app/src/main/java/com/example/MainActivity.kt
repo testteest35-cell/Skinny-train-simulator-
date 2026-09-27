@@ -74,7 +74,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Keyboard & Gamepad Shortcuts: W/S throttle, A/D reverser, Space brake, H horn, C camera, F3 debug, F9 self-test, M mute
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         val state = viewModel.uiState.value
         return when (keyCode) {
@@ -106,6 +105,14 @@ class MainActivity : ComponentActivity() {
                 viewModel.ringBell()
                 true
             }
+            KeyEvent.KEYCODE_V -> {
+                viewModel.toggleSand()
+                true
+            }
+            KeyEvent.KEYCODE_L -> {
+                viewModel.cycleHeadlights()
+                true
+            }
             KeyEvent.KEYCODE_C -> {
                 viewModel.cycleCameraMode()
                 true
@@ -134,7 +141,6 @@ fun IronRailSimApp(viewModel: MainViewModel) {
     val surveyorItems by viewModel.surveyorItems.collectAsStateWithLifecycle()
     val mediaHistory by viewModel.generatedMediaHistory.collectAsStateWithLifecycle()
 
-    // BackHandler for secondary tabs or Surveyor mode
     BackHandler(enabled = state.activeTab != MainNavTab.SIMULATOR || state.isSurveyorMode) {
         if (state.activeTab != MainNavTab.SIMULATOR) {
             viewModel.selectTab(MainNavTab.SIMULATOR)
@@ -189,6 +195,18 @@ fun IronRailSimApp(viewModel: MainViewModel) {
                                 gradientPercent = state.gradientPercent,
                                 curveDeg = state.curveDeg,
                                 throttleNotch = state.throttleNotch,
+                                reverser = state.reverser,
+                                autoBrakePercent = state.autoBrakePercent,
+                                indBrakePercent = state.indBrakePercent,
+                                brakePipePsi = state.brakePipePsi,
+                                sandActive = state.sandActive,
+                                headlightState = state.headlightState,
+                                wipersActive = state.wipersActive,
+                                wiperPhaseRad = state.wiperPhaseRad,
+                                wheelRotationRad = state.wheelRotationRad,
+                                timeOfDay = state.timeOfDay,
+                                weather = state.weather,
+                                qualityPreset = state.qualityPreset,
                                 cameraMode = state.cameraMode,
                                 locoIndex = state.selectedLocoIndex,
                                 freightCarIndex = state.selectedFreightCarIndex,
@@ -216,6 +234,11 @@ fun IronRailSimApp(viewModel: MainViewModel) {
                                     scenario = state.scenario,
                                     scenarioScore = state.scenarioScore,
                                     wheelSlip = state.wheelSlip,
+                                    spadPenalty = state.spadPenalty,
+                                    cameraMode = state.cameraMode,
+                                    timeOfDay = state.timeOfDay,
+                                    weather = state.weather,
+                                    qualityPreset = state.qualityPreset,
                                     statusMessage = state.statusMessage,
                                     subtitleCue = state.subtitleCue,
                                     uiScale = state.uiScale,
@@ -223,6 +246,9 @@ fun IronRailSimApp(viewModel: MainViewModel) {
                                     onToggleF3 = viewModel::toggleF3Diagnostics,
                                     onRunF9SelfTest = viewModel::runF9SelfTest,
                                     onCycleCamera = viewModel::cycleCameraMode,
+                                    onCycleTimeOfDay = viewModel::cycleTimeOfDay,
+                                    onCycleWeather = viewModel::cycleWeather,
+                                    onCycleQualityPreset = viewModel::cycleQualityPreset,
                                     onOpenSaveModal = { viewModel.setShowSaveModal(true) },
                                     onOpenAccessModal = { viewModel.setShowAccessModal(true) },
                                     muted = state.muted,
@@ -264,6 +290,12 @@ fun IronRailSimApp(viewModel: MainViewModel) {
                             onIndBrakeChange = viewModel::setIndBrake,
                             dynamicBrakeNotch = state.dynamicBrakeNotch,
                             onDynamicBrakeChange = viewModel::setDynamicBrake,
+                            sandActive = state.sandActive,
+                            onToggleSand = viewModel::toggleSand,
+                            headlightState = state.headlightState,
+                            onCycleHeadlights = viewModel::cycleHeadlights,
+                            wipersActive = state.wipersActive,
+                            onToggleWipers = viewModel::toggleWipers,
                             couplerSlackEnabled = state.couplerSlackEnabled,
                             onToggleCouplerSlack = viewModel::toggleCouplerSlack,
                             onSoundHorn = viewModel::soundHorn,
@@ -341,7 +373,7 @@ private fun SaveLoadSlotsDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = RailSurfaceDark,
-        title = { Text("Deterministic Save Slots (Room DB, <200KB)", color = AmberGold) },
+        title = { Text("Deterministic Save Slots (Room DB)", color = AmberGold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -441,7 +473,7 @@ private fun AccessibilityDialog(
 
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "Colourblind Signal Shapes Active: Square = Clear Green, Diamond = Approach Yellow, Circle = Stop Red.",
+                    "Colourblind Signal Shapes Active: Square = Clear Green, Diamond = Caution Yellow, Circle = Stop Red.",
                     style = MaterialTheme.typography.labelSmall,
                     color = SignalGreen
                 )

@@ -15,13 +15,17 @@ import com.example.data.SimRepository
 import com.example.data.SurveyorItemEntity
 import com.example.sim.BenchmarkReport
 import com.example.sim.HardcodedAssetLibrary
+import com.example.sim.HeadlightState
+import com.example.sim.QualityPreset
 import com.example.sim.RecordedInputEvent
 import com.example.sim.ScenarioId
 import com.example.sim.SelfTestReport
 import com.example.sim.SignalAspect
+import com.example.sim.TimeOfDayMode
 import com.example.sim.TrainAudioSynthesizer
 import com.example.sim.TrainPhysicsEngine
 import com.example.sim.TrainSimConfig
+import com.example.sim.WeatherMode
 import com.example.ui.CameraViewMode
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,7 +41,7 @@ import kotlinx.serialization.json.Json
 import kotlin.math.abs
 
 enum class MainNavTab(val label: String) {
-    SIMULATOR("Simulator"),
+    SIMULATOR("3D Simulator"),
     AI_STUDIO("AI Rail Studio"),
     DOCS_QA("Engine & QA")
 }
@@ -54,6 +58,14 @@ data class SimUiState(
     val autoBrakePercent: Float = 0f,
     val indBrakePercent: Float = 0f,
     val dynamicBrakeNotch: Int = 0,
+    val sandActive: Boolean = false,
+    val headlightState: HeadlightState = HeadlightState.BRIGHT,
+    val wipersActive: Boolean = false,
+    val wiperPhaseRad: Float = 0f,
+    val wheelRotationRad: Float = 0f,
+    val timeOfDay: TimeOfDayMode = TimeOfDayMode.DUSK,
+    val weather: WeatherMode = WeatherMode.CLEAR,
+    val qualityPreset: QualityPreset = QualityPreset.HIGH,
     val couplerSlackEnabled: Boolean = true,
     val positionMeters: Double = 0.0,
     val speedKmH: Double = 0.0,
@@ -66,6 +78,7 @@ data class SimUiState(
     val distanceToNextStation: Double = 600.0,
     val scenarioScore: Int = 100,
     val wheelSlip: Boolean = false,
+    val spadPenalty: Boolean = false,
     val statusMessage: String = "READY — SELECT NOTCH N1+ TO DEPART",
     val subtitleCue: String? = null,
     // Diagnostics & Self-Test
@@ -73,20 +86,20 @@ data class SimUiState(
     val fps: Float = 60.0f,
     val avgFrameMs: Float = 14.2f,
     val onePercentLowMs: Float = 16.8f,
-    val drawCalls: Int = 42,
-    val triangles: Int = 24800,
-    val culledObjects: Int = 118,
-    val heapMb: Float = 86.0f,
+    val drawCalls: Int = 48,
+    val triangles: Int = 28400,
+    val culledObjects: Int = 124,
+    val heapMb: Float = 88.0f,
     val tickCount: Long = 0L,
     val seed: Int = 1337420,
     val activeParticles: Int = 0,
-    val qualityTierLabel: String = "Tier 0: Locked 60Hz (Full LOD, 400m Fog)",
+    val qualityTierLabel: String = "Preset: High (Real-Time Shadows + 60Hz)",
     val benchmarkRunning: Boolean = false,
     val benchmarkReport: BenchmarkReport? = null,
     val selfTestReport: SelfTestReport? = null,
     // Surveyor
     val isPlacingTrackSpline: Boolean = true,
-    val selectedSurveyorAssetId: String = "scn_pine",
+    val selectedSurveyorAssetId: String = "scn_depot",
     val surveyorSnapAngleDeg: Int = 0,
     // Accessibility & Audio
     val uiScale: Float = 1.0f,
@@ -121,13 +134,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val generatedMediaHistory: StateFlow<List<GeneratedRailMediaEntity>> = repository.generatedMedia
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Pooled 20-step Undo/Redo Stacks for Surveyor Mode
     private val undoStack = ArrayDeque<SurveyorItemEntity>(TrainSimConfig.UNDO_STACK_MAX)
     private val redoStack = ArrayDeque<SurveyorItemEntity>(TrainSimConfig.UNDO_STACK_MAX)
 
     init {
         physicsEngine.resetScenario(ScenarioId.FREE_ROAM)
-        // Generate an initial preview image in AI Studio so the studio has immediate visual polish
         viewModelScope.launch {
             val initialBmp = GeminiRailStudioService.renderProceduralLiveryBitmap(
                 "Amber & Slate Heavy Freight Locomotive in Alpine Pass",
@@ -156,6 +167,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var lastDiagUpdateMs = System.currentTimeMillis()
             var lastAutosaveMs = System.currentTimeMillis()
             var prevSlip = false
+            var prevSpad = false
 
             while (isActive) {
                 val nowNs = System.nanoTime()
@@ -174,21 +186,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     accumulatorSec -= TrainSimConfig.FIXED_DT
                 }
 
-                // Trigger wheel-slip audio on rising edge
                 if (physicsEngine.wheelSlipActive && !prevSlip) {
                     audioSynth.playWheelSlip()
-                    triggerSubtitle("[WHEEL SLIP ALARM — REDUCE THROTTLE]")
+                    triggerSubtitle("[WHEEL SLIP! ENGAGE SAND OR REDUCE THROTTLE]")
                 }
                 prevSlip = physicsEngine.wheelSlipActive
 
+                if (physicsEngine.spadPenaltyActive && !prevSpad) {
+                    audioSynth.playBrakeSqueal()
+                    triggerSubtitle("[SPAD PENALTY! RED SIGNAL PASSED AT DANGER]")
+                }
+                prevSpad = physicsEngine.spadPenaltyActive
+
                 val nowMs = System.currentTimeMillis()
-                // Autosave every 30 seconds or on station stop
                 if (stationStoppedThisFrame || (nowMs - lastAutosaveMs >= 30_000L && physicsEngine.tickCount > 60L)) {
                     lastAutosaveMs = nowMs
                     saveToSlot(slotIndex = 1, isAutoSave = true)
                 }
 
-                // 4 Hz Diagnostics & Adaptive Quality Governor Evaluation
                 val updateDiag = (nowMs - lastDiagUpdateMs >= 250L)
                 if (updateDiag) {
                     lastDiagUpdateMs = nowMs
@@ -199,17 +214,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 _uiState.update { st ->
                     st.copy(
+                        throttleNotch = physicsEngine.throttleNotch,
+                        autoBrakePercent = physicsEngine.autoBrakePercent,
+                        indBrakePercent = physicsEngine.indBrakePercent,
                         positionMeters = physicsEngine.positionMeters,
                         speedMps = physicsEngine.speedMps,
                         speedKmH = physicsEngine.speedMps * 3.6,
                         gradientPercent = physicsEngine.currentGradientPercent,
                         curveDeg = physicsEngine.currentCurveDeg,
                         brakePipePsi = physicsEngine.brakePipePsi,
+                        wiperPhaseRad = physicsEngine.wiperPhaseRad,
+                        wheelRotationRad = physicsEngine.wheelRotationRad,
                         nextSignalAspect = physicsEngine.nextSignalAspect,
                         distanceToNextSignal = physicsEngine.distanceToNextSignalMeters,
                         distanceToNextStation = physicsEngine.distanceToNextStationMeters,
                         scenarioScore = physicsEngine.scenarioScore,
                         wheelSlip = physicsEngine.wheelSlipActive,
+                        spadPenalty = physicsEngine.spadPenaltyActive,
                         statusMessage = physicsEngine.statusMessage,
                         fps = if (updateDiag) physicsEngine.currentFps else st.fps,
                         avgFrameMs = if (updateDiag) physicsEngine.avgFrameTimeMs else st.avgFrameMs,
@@ -245,6 +266,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         triggerSubtitle("[CAMERA: ${next.label.uppercase()}]")
     }
 
+    fun cycleTimeOfDay() {
+        val modes = TimeOfDayMode.entries
+        val next = modes[(physicsEngine.timeOfDay.ordinal + 1) % modes.size]
+        physicsEngine.timeOfDay = next
+        _uiState.update { it.copy(timeOfDay = next) }
+        triggerSubtitle("[TIME OF DAY: ${next.label.uppercase()}]")
+    }
+
+    fun cycleWeather() {
+        val modes = WeatherMode.entries
+        val next = modes[(physicsEngine.weather.ordinal + 1) % modes.size]
+        physicsEngine.weather = next
+        if (next == WeatherMode.LIGHT_RAIN && !physicsEngine.wipersActive) {
+            physicsEngine.wipersActive = true
+        }
+        _uiState.update { it.copy(weather = next, wipersActive = physicsEngine.wipersActive) }
+        triggerSubtitle("[WEATHER: ${next.label.uppercase()}]")
+    }
+
+    fun cycleQualityPreset() {
+        val presets = QualityPreset.entries
+        val next = presets[(physicsEngine.qualityPreset.ordinal + 1) % presets.size]
+        physicsEngine.qualityPreset = next
+        _uiState.update { it.copy(qualityPreset = next) }
+    }
+
+    fun toggleSand() {
+        val next = !physicsEngine.sandActive
+        physicsEngine.sandActive = next
+        _uiState.update { it.copy(sandActive = next) }
+        triggerSubtitle(if (next) "[SANDERS ENGAGED — ADHESION BOOSTED]" else "[SANDERS OFF]")
+    }
+
+    fun cycleHeadlights() {
+        val states = HeadlightState.entries
+        val next = states[(physicsEngine.headlightState.ordinal + 1) % states.size]
+        physicsEngine.headlightState = next
+        _uiState.update { it.copy(headlightState = next) }
+    }
+
+    fun toggleWipers() {
+        val next = !physicsEngine.wipersActive
+        physicsEngine.wipersActive = next
+        _uiState.update { it.copy(wipersActive = next) }
+    }
+
     fun launchSingleFileWebGlMode() {
         _uiState.update {
             it.copy(
@@ -258,8 +325,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setThrottleNotch(notch: Int) {
         val clamped = notch.coerceIn(0, 8)
         physicsEngine.throttleNotch = clamped
-        if (clamped > 0 && physicsEngine.autoBrakePercent > 0f) {
-            // Automatically release brake slightly for immediate user responsiveness
+        if (clamped > 0 && physicsEngine.autoBrakePercent > 0f && physicsEngine.scenario != ScenarioId.TUTORIAL) {
             physicsEngine.autoBrakePercent = 0f
             physicsEngine.indBrakePercent = 0f
         }
@@ -345,7 +411,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             it.copy(
                 scenario = scenario,
-                selectedLocoIndex = scenario.defaultLocoIndex,
+                selectedLocoIndex = physicsEngine.selectedLocoIndex,
+                selectedFreightCarIndex = physicsEngine.selectedFreightCarIndex,
                 throttleNotch = physicsEngine.throttleNotch,
                 reverser = physicsEngine.reverser,
                 autoBrakePercent = physicsEngine.autoBrakePercent,
@@ -359,11 +426,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val valid = index.coerceIn(0, HardcodedAssetLibrary.locomotives.lastIndex)
         physicsEngine.selectedLocoIndex = valid
         audioSynth.playCouplerClank()
+        val loco = HardcodedAssetLibrary.locomotives[valid]
         _uiState.update {
             it.copy(
                 selectedLocoIndex = valid,
                 customLiveryColor = null,
-                statusMessage = "LOCOMOTIVE ACTIVE: ${HardcodedAssetLibrary.locomotives[valid].name}"
+                statusMessage = "LOCO: ${loco.name} (${loco.tractionType}, ${loco.triangleCount} tris)"
             )
         }
     }
@@ -380,7 +448,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 f3Visible = true,
                 selfTestReport = report,
                 statusMessage = if (report.overallPass) {
-                    "F9 SELF-TEST PASSED: 35 ASSETS, 600 TICKS & BRAKES VERIFIED"
+                    "F9 SELF-TEST PASSED: 35 3D ASSETS, 600 TICKS & BRAKES VERIFIED"
                 } else {
                     "F9 SELF-TEST WARNING"
                 }
@@ -396,7 +464,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var minFps = 60f
             var sumFps = 0f
             var samples = 0
-            // Sample accelerated soak window
             repeat(12) {
                 delay(250L)
                 val f = physicsEngine.currentFps
@@ -425,7 +492,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 maxDrawCalls = physicsEngine.activeDrawCalls,
                 maxTriangles = physicsEngine.activeTriangles,
                 passedAllCriteria = pass,
-                verdictSummary = "Avg ${"%.1f".format(avgFps)} FPS, 1% Low ${"%.1f".format(physicsEngine.onePercentLowMs)}ms, Peak RAM ${"%.1f".format(endHeap)}MB (<350MB), DrawCalls ${physicsEngine.activeDrawCalls}/80"
+                verdictSummary = "Avg ${"%.1f".format(avgFps)} FPS, 1% Low ${"%.1f".format(physicsEngine.onePercentLowMs)}ms, Peak RAM ${"%.1f".format(endHeap)}MB, DrawCalls ${physicsEngine.activeDrawCalls}/80"
             )
             _uiState.update {
                 it.copy(
@@ -436,8 +503,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-
-    // --- Surveyor Mode (5° Angle Snapping & Pooled 20-step Undo/Redo) ---
 
     fun setSurveyorPlacementMode(isTrackSpline: Boolean) {
         _uiState.update { it.copy(isPlacingTrackSpline = isTrackSpline) }
@@ -495,8 +560,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             undoStack.addLast(item.copy(id = newId))
         }
     }
-
-    // --- Deterministic Save / Load Slots (3 Slots, Version Validated) ---
 
     fun setShowSaveModal(visible: Boolean) {
         _uiState.update { it.copy(showSaveModal = visible) }
@@ -580,8 +643,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Accessibility Settings ---
-
     fun setUiScale(scale: Float) {
         _uiState.update { it.copy(uiScale = scale.coerceIn(0.75f, 1.50f)) }
     }
@@ -602,8 +663,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { if (it.subtitleCue == cue) it.copy(subtitleCue = null) else it }
         }
     }
-
-    // --- AI Rail Studio Actions (Gemini 3.1 Flash Image, Gemini 3 Pro Image, Veo 3.1 Fast Video) ---
 
     fun generateRailImage(prompt: String, aspectRatio: String, studioQuality: Boolean) {
         viewModelScope.launch {
@@ -693,7 +752,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun applyLiveryFromBitmap(bitmap: Bitmap) {
-        // Sample center-region pixel to derive custom locomotive livery color
         val cx = (bitmap.width / 2).coerceIn(0, bitmap.width - 1)
         val cy = (bitmap.height / 2).coerceIn(0, bitmap.height - 1)
         val pixel = bitmap.getPixel(cx, cy)
