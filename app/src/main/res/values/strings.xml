@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">IronRail 3D Sim</string>
+    <string name="nav_simulator">Simulator</string>
+    <string name="nav_surveyor">Surveyor</string>
+    <string name="nav_ai_studio">AI Rail Studio</string>
+    <string name="nav_specs_qa">Engine &amp; QA</string>
+    <string name="mode_driver">Driver Mode</string>
+    <string name="mode_surveyor">Surveyor Mode</string>
+    <string name="camera_cab">Cab View</string>
+    <string name="camera_chase">Chase Cam</string>
+    <string name="horn_label">HORN (H)</string>
+    <string name="bell_label">BELL (B)</string>
+    <string name="ebrake_label">E-BRAKE</string>
+    <string name="security_warning_prototype">Security Warning: API keys are packaged in BuildConfig for this prototype. Android APKs can be decompiled; do not share this APK publicly.</string>
+</resources>

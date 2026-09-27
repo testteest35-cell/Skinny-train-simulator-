@@ -1,0 +1,6 @@
+{
+  "name": "IronRail 3D Sim",
+  "description": "High-performance 60Hz deterministic 3D train simulator with Driver & Surveyor modes, procedural audio, and AI Rail Livery & Veo Video Studio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
