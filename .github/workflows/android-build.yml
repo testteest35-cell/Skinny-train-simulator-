@@ -25,19 +25,57 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK Licenses & Install SDK 36
+      - name: Setup Android SDK & Licenses
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" || true
+          set -e
+          # Use pre-installed GitHub runner Android SDK if available, else create in $HOME
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK_DIR" ] || [ ! -w "$SDK_DIR" ]; then
+            sudo chmod -R a+rwx "$SDK_DIR" 2>/dev/null || SDK_DIR="$HOME/android-sdk"
+          fi
+          mkdir -p "$SDK_DIR/licenses" "$SDK_DIR/cmdline-tools"
+
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+
+          # Pre-populate official Google Android SDK & Preview license hashes so AGP auto-download always succeeds
+          printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n859f317696f67ef3d7f30a50a5560e7834b43903\n" > "$SDK_DIR/licenses/android-sdk-license"
+          printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n79120722343a6f314e0719f863036c702b0e6b2a\n" > "$SDK_DIR/licenses/android-sdk-preview-license"
+
+          # Locate existing sdkmanager on ubuntu-latest or install commandlinetools if missing
+          SDKMANAGER=""
+          for candidate in \
+            "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" \
+            "$SDK_DIR"/cmdline-tools/*/bin/sdkmanager \
+            "$(which sdkmanager 2>/dev/null || true)"; do
+            if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+              SDKMANAGER="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "Downloading Android command-line tools..."
+            curl -sSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
+            unzip -q -o /tmp/cmdtools.zip -d /tmp/cmdtools
+            mkdir -p "$SDK_DIR/cmdline-tools/latest"
+            cp -r /tmp/cmdtools/cmdline-tools/* "$SDK_DIR/cmdline-tools/latest/"
+            rm -rf /tmp/cmdtools /tmp/cmdtools.zip
+            SDKMANAGER="$SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
+          fi
+
+          yes | "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-36" "platforms;android-36.1" "build-tools;36.0.0" || true
 
       - name: Prepare .env for Secrets Gradle Plugin
         env:
           SECRET_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          cp .env.example .env
+          if [ -f ".env.example" ]; then
+            cp .env.example .env
+          else
+            echo "GEMINI_API_KEY=MY_GEMINI_API_KEY" > .env
+          fi
           if [ -n "$SECRET_GEMINI_API_KEY" ]; then
             echo "Injecting GEMINI_API_KEY from GitHub Actions Secrets into .env"
             sed -i "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=${SECRET_GEMINI_API_KEY}|" .env
@@ -59,16 +97,16 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Set up Gradle
+      - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: wrapper
+          gradle-version: '9.3.1'
 
       - name: Build Debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:assembleDebug -Pandroid.builder.sdkDownload=true --no-daemon --stacktrace
 
       - name: Run Unit Tests
-        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+        run: gradle :app:testDebugUnitTest -Pandroid.builder.sdkDownload=true --no-daemon --stacktrace
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
